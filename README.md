@@ -53,6 +53,7 @@ While machine learning can accurately predict stability limits, the results show
 * `physics.py` - contains logic for all three integrators, defines physical constants, and computes the orbits and related factors
 * `search.py` - runs "brute-force" tests to find the exact time an orbit becomes unstable, which the ML tries to predict
 * `data.py` - generates the orbits
+* `config.py` - contains all the constants
 * `modeling.py` - contains the ML logic
 * `__init__.py` - tells Python that all these files belong together
 * `plotting.py` - makes all the charts and graphs
