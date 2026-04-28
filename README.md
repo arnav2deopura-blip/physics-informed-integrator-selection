@@ -1,5 +1,11 @@
 # Physics-Informed Machine Learning for Orbital Integrator Optimization
 
+> Predicting stable timesteps and optimal integrators for orbital simulations using physics-aware machine learning.
+
+![Python](https://img.shields.io/badge/Python-3.10-blue)
+![ML](https://img.shields.io/badge/Model-RandomForest-green)
+![Status](https://img.shields.io/badge/Status-Research_Project-orange)
+
 ## Overview
 
 This project develops a physics-informed machine learning framework to predict stable timesteps and select optimal numerical integrators for orbital simulations. Traditional methods rely on computationally expensive brute-force testing, while this approach learns stability behavior directly from data.
