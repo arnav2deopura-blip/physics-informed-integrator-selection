@@ -1,3 +1,1 @@
-from .pipeline import main
-
-__all__ = ["main"]
+"""orbit_ml package."""
