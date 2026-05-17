@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pandas as pd
 import warnings
 
 from .config import (
@@ -13,6 +14,7 @@ from .config import (
 from .data import generate_challenging_benchmark, generate_training_dataset
 from .modeling import (
     analyze_single_orbit,
+    fit_simple_rk4_baselines,
     fit_fixed_split_models,
     held_out_baseline_comparison,
     high_eccentricity_holdout,
@@ -42,11 +44,39 @@ def _print_feature_ablation(report: dict) -> None:
             f"MAE = {report['phys_mae_mean'][i]:.5f} +/- {report['phys_mae_std'][i]:.5f}"
         )
 
+def print_phase_boundary_stats(benchmark_df: pd.DataFrame) -> None:
+    print("\n" + "=" * 50)
+    print("BENCHMARK REGIME SUMMARY")
+    print("=" * 50)
+
+    ultra_short = benchmark_df[benchmark_df["period_mult"] <= 0.5]
+    short = benchmark_df[(benchmark_df["period_mult"] > 0.5) & (benchmark_df["period_mult"] <= 3.0)]
+    medium = benchmark_df[(benchmark_df["period_mult"] > 3.0) & (benchmark_df["period_mult"] <= 30.0)]
+    long = benchmark_df[benchmark_df["period_mult"] >= 100.0]
+
+    for label, subset in [
+        ("Ultra-short (<= 0.5 orbit)", ultra_short),
+        ("Short (0.5 to 3 orbits)", short),
+        ("Medium (3 to 30 orbits)", medium),
+        ("Long (100+ orbits)", long),
+    ]:
+        if subset.empty:
+            continue
+        rk4_wins = (subset["best_score_integrator"] == "rk4").mean() * 100.0
+        leap_wins = (subset["best_score_integrator"] == "leapfrog").mean() * 100.0
+        euler_wins = (subset["best_score_integrator"] == "euler").mean() * 100.0
+        print(label + ":")
+        print(f"  -> RK4 won {rk4_wins:.1f}% of the time")
+        print(f"  -> Leapfrog won {leap_wins:.1f}% of the time")
+        print(f"  -> Euler won {euler_wins:.1f}% of the time")
+        print()
+
+    print("=" * 50 + "\n")
 
 def main() -> None:
     warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
-    print(f"Generating {NUM_RANDOM_ORBITS} training orbits using {N_WORKERS} workers...")
+    print(f"Generating {NUM_RANDOM_ORBITS} training orbits using {N_WORKERS} workers...", flush=True)
     data, failure_rates = generate_training_dataset()
     print("\nFailure rates:")
     for name, rate in failure_rates.items():
@@ -78,33 +108,42 @@ def main() -> None:
     benchmark_true_best = benchmark_data[
         ["score_euler", "score_rk4", "score_leapfrog"]
     ].values.argmax(axis=1)
-    print("\n--- BENCHMARK SCORE WINNERS ---")
+    print("\n--- BENCHMARK SCORE WINNERS (combined stability/efficiency score) ---")
     print(f"Euler wins by score: {100.0 * (benchmark_true_best == 0).mean():.1f}%")
     print(f"RK4 wins by score: {100.0 * (benchmark_true_best == 1).mean():.1f}%")
     print(f"Leapfrog wins by score: {100.0 * (benchmark_true_best == 2).mean():.1f}%")
+    print_phase_boundary_stats(benchmark_data)
 
     feature_report = run_feature_ablation(data)
     _print_feature_ablation(feature_report)
 
     split_context = fit_fixed_split_models(data)
+    baseline_coeffs = fit_simple_rk4_baselines(
+        split_context["data_train"],
+        split_context["y_train"],
+    )
     baseline_report = held_out_baseline_comparison(
         split_context["data_test"],
         split_context["y_test"],
         split_context["pred_phys"],
+        baseline_coeffs,
     )
 
-    print("\n--- HELD-OUT BASELINE COMPARISON ---")
-    print(f"Naive period rule: {baseline_report['naive_period_rule']:.5f}")
-    print(f"Kepler scaling rule: {baseline_report['kepler_scaling_rule']:.5f}")
+    print("\n--- HELD-OUT BASELINE COMPARISON (RK4 TARGET) ---")
+    print(f"Fitted period coefficient: {baseline_report['period_coeff']:.5f}")
+    print(f"Fitted Kepler coefficient: {baseline_report['kepler_coeff']:.5f}")
+    print(f"Tuned period rule: {baseline_report['naive_period_rule']:.5f}")
+    print(f"Tuned Kepler scaling rule: {baseline_report['kepler_scaling_rule']:.5f}")
     print(f"ML model: {baseline_report['ml_model']:.5f}")
-    print(f"Best improvement vs naive: {baseline_report['improvement_vs_naive']:.2f}x")
-    print(f"Best improvement vs Kepler: {baseline_report['improvement_vs_kepler']:.2f}x")
+    print(f"Improvement vs tuned period rule: {baseline_report['improvement_vs_naive']:.2f}x")
+    print(f"Improvement vs tuned Kepler rule: {baseline_report['improvement_vs_kepler']:.2f}x")
 
     selection_report = integrator_selection_stats(
         split_context["y_test"],
         split_context["pred_phys"],
     )
-    print("\n--- DT-BASED INTEGRATOR SELECTION ACCURACY ---")
+    print("\n--- HELD-OUT DT-LABEL SELECTION ACCURACY ---")
+    print("This checks whether the model recovers the integrator with the largest stable-dt label.")
     print(
         f"Model chooses best integrator correctly {100.0 * selection_report['accuracy']:.2f}% of the time"
     )
@@ -114,9 +153,7 @@ def main() -> None:
     )
     print(f"Fraction where Euler is best: {100.0 * selection_report['euler_fraction']:.1f}%")
     print(f"Fraction where RK4 is best: {100.0 * selection_report['rk4_fraction']:.1f}%")
-    print(
-        f"Fraction where Leapfrog is best: {100.0 * selection_report['leapfrog_fraction']:.1f}%"
-    )
+    print(f"Fraction where Leapfrog is best: {100.0 * selection_report['leapfrog_fraction']:.1f}%")
 
     regime_context = high_eccentricity_holdout(data)
     print("--- HIGH-ECCENTRICITY HOLDOUT REPORT ---")
