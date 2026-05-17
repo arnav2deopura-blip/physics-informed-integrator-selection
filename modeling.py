@@ -110,25 +110,48 @@ def fit_fixed_split_models(data: pd.DataFrame, random_state: int = 42) -> dict:
         "pred_phys": pred_phys,
         "model_basic": model_basic,
         "model_phys": model_phys,
+        "data_train": data.iloc[train_idx].reset_index(drop=True),
+        "y_train": y_train,
     }
 
+def fit_simple_rk4_baselines(data_train: pd.DataFrame, y_train: np.ndarray) -> dict:
+    period = data_train["period"].to_numpy(dtype=float)
+    kepler = np.sqrt(data_train["r"].to_numpy(dtype=float) ** 3 / GM)
+    rk4_target = y_train[:, 1]
 
-def held_out_baseline_comparison(data_test: pd.DataFrame, y_test: np.ndarray, pred_phys: np.ndarray) -> dict:
-    baseline1 = 0.01 * data_test["period"].to_numpy()
-    baseline2 = 0.05 * np.sqrt(data_test["r"].to_numpy() ** 3 / GM)
+    period_coeff = float(np.dot(period, rk4_target) / max(np.dot(period, period), 1e-12))
+    kepler_coeff = float(np.dot(kepler, rk4_target) / max(np.dot(kepler, kepler), 1e-12))
+
+    return {
+        "period_coeff": period_coeff,
+        "kepler_coeff": kepler_coeff,
+    }
+
+def held_out_baseline_comparison(
+    data_test: pd.DataFrame,
+    y_test: np.ndarray,
+    pred_phys: np.ndarray,
+    baseline_coeffs: dict,
+) -> dict:
+    period = data_test["period"].to_numpy(dtype=float)
+    kepler = np.sqrt(data_test["r"].to_numpy(dtype=float) ** 3 / GM)
+
+    baseline1 = baseline_coeffs["period_coeff"] * period
+    baseline2 = baseline_coeffs["kepler_coeff"] * kepler
 
     err1 = float(np.mean(np.abs(baseline1 - y_test[:, 1])))
     err2 = float(np.mean(np.abs(baseline2 - y_test[:, 1])))
     model_err = float(np.mean(np.abs(pred_phys[:, 1] - y_test[:, 1])))
 
     return {
+        "period_coeff": baseline_coeffs["period_coeff"],
+        "kepler_coeff": baseline_coeffs["kepler_coeff"],
         "naive_period_rule": err1,
         "kepler_scaling_rule": err2,
         "ml_model": model_err,
         "improvement_vs_naive": err1 / model_err,
         "improvement_vs_kepler": err2 / model_err,
     }
-
 
 def integrator_selection_stats(y_test: np.ndarray, pred_phys: np.ndarray) -> dict:
     true_best = np.argmax(y_test, axis=1)
@@ -247,3 +270,50 @@ def analyze_single_orbit(
         "best_name": best_name,
         "input_df": input_df,
     }
+
+def run_dataset_size_study(full_data: pd.DataFrame):
+    sizes = [100, 500, 1000, 2000, 5000, 10000, 20000]
+    results = []
+
+    # Features and Targets
+    X = full_data[PHYSICS_FEATURE_COLUMNS].values
+    y = full_data[TARGET_COLUMNS].values
+    
+    # We use a consistent holdout set (20% of the 10k) to test all models fairly
+    X_train_full, X_test, y_train_full, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    usable_sizes = []
+    max_train = len(X_train_full)
+    for size in sizes:
+        capped = min(size, max_train)
+        if capped not in usable_sizes:
+            usable_sizes.append(capped)
+
+    for size in usable_sizes:
+        print(f"Evaluating model with size: {size}...")
+        # Take a subset of the training data
+        X_sub = X_train_full[:size]
+        y_sub = y_train_full[:size]
+
+        # Train model
+        model = RandomForestRegressor(n_estimators=100, n_jobs=-1, random_state=42)
+        model.fit(X_sub, y_sub)
+
+        # 1. Calculate Error (MAE for RK4)
+        preds = model.predict(X_test)
+        mae_rk4 = mean_absolute_error(y_test[:, 1], preds[:, 1])
+        r2_rk4 = r2_score(y_test[:, 1], preds[:, 1])
+
+        # 2. Calculate Prediction Variance (Uncertainty)
+        # We look at the disagreement between the 100 trees in the forest
+        tree_preds = np.array([tree.predict(X_test)[:, 1] for tree in model.estimators_])
+        avg_variance = np.mean(np.var(tree_preds, axis=0))
+
+        results.append({
+            "size": size,
+            "mae": mae_rk4,
+            "r2": r2_rk4,
+            "variance": avg_variance
+        })
+
+    return pd.DataFrame(results)
