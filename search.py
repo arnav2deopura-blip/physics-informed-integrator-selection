@@ -24,6 +24,38 @@ def max_energy_error(step_func, start_state: State, dt_val: float, limit_t: floa
 
     return max_err
 
+def _dt_upper_bound(r_start: float) -> float:
+    local_time = float(np.sqrt((r_start**3) / GM))
+    return max(0.02, min(1.0, 0.75 * local_time))
+
+
+def _trajectory_errors(
+    integrator_name: str,
+    start_state: State,
+    dt_val: float,
+    limit_t: float,
+    perturb_eps: float = 0.0,
+) -> tuple[bool, float, float]:
+    estimated_steps = limit_t / max(float(dt_val), 1e-12)
+    if estimated_steps > 200000:
+        return False, np.inf, np.inf
+    _, _, energy, angmom, _, times = run_sim_diagnostics(
+        INTEGRATORS[integrator_name],
+        start_state,
+        float(dt_val),
+        float(limit_t),
+        perturb_eps,
+        max_steps=500000,
+        track={"energy", "angmom", "times"},
+        compute_stats_only=True,
+    )
+
+    if len(times) < 2 or times[-1] < 0.99 * limit_t:
+        return False, np.inf, np.inf
+
+    energy_error = energy[1]  # max deviation (second element)
+    angmom_error = angmom[1]  # max deviation (second element)
+    return True, energy_error, angmom_error
 
 def find_dt_for_integrator(
     integrator_name: str,
@@ -31,78 +63,83 @@ def find_dt_for_integrator(
     vy_start: float,
     r_start: float = 1.0,
     sim_time: float = 5.0,
+    perturb_eps: float = 0.0,
 ) -> float:
-    dt_test = 0.3
-    error_tolerance = 0.05 if integrator_name == "euler" else 0.01
+    start_state = [r_start, 0.0, vx_start, vy_start]
+    dt_min = 0.0005
+    dt_max = _dt_upper_bound(r_start)
+    tol_energy = 0.01
+    tol_angmom = 0.01
 
-    while dt_test >= 0.0005:
-        max_error = 0.0
-        state = [r_start, 0.0, vx_start, vy_start]
-        start_energy = get_energy(state)
-        curr_time = 0.0
+    dt_test = dt_max
+    best_dt = None
 
-        while curr_time < sim_time:
-            state = INTEGRATORS[integrator_name](state, dt_test)
-            max_error = max(max_error, _relative_error(start_energy, get_energy(state)))
-            curr_time += dt_test
+    while dt_test >= dt_min:
+        completed, energy_err, angmom_err = _trajectory_errors(
+            integrator_name,
+            start_state,
+            dt_test,
+            sim_time,
+            perturb_eps,
+        )
 
-        if max_error < error_tolerance:
+        if completed and energy_err <= tol_energy and angmom_err <= tol_angmom:
             best_dt = dt_test
-            dt_try = dt_test * 1.5
+            break
 
-            while dt_try < 0.3:
-                state = [r_start, 0.0, vx_start, vy_start]
-                start_energy = get_energy(state)
-                curr_time = 0.0
-                max_error = 0.0
+        dt_test = round(dt_test / 2.0, 6)
 
-                while curr_time < sim_time:
-                    state = INTEGRATORS[integrator_name](state, dt_try)
-                    max_error = max(max_error, _relative_error(start_energy, get_energy(state)))
-                    curr_time += dt_try
+    if best_dt is None:
+        return 0.0001
 
-                if max_error < error_tolerance:
-                    best_dt = dt_try
-                    dt_try *= 1.2
-                else:
-                    break
+    dt_try = min(dt_max, best_dt * 1.25)
+    while dt_try > best_dt and dt_try <= dt_max + 1e-12:
+        completed, energy_err, angmom_err = _trajectory_errors(
+            integrator_name,
+            start_state,
+            dt_try,
+            sim_time,
+            perturb_eps,
+        )
+        if completed and energy_err <= tol_energy and angmom_err <= tol_angmom:
+            best_dt = dt_try
+            next_dt = min(dt_max, dt_try * 1.15)
+            if next_dt <= dt_try:
+                break
+            dt_try = next_dt
+        else:
+            break
 
-            return best_dt
-
-        dt_test = round(dt_test / 2.0, 5)
-
-    return 0.0001
-
+    return round(float(best_dt), 6)
 
 def combined_performance_score(
-    stable_dt: float,
-    local_time: float,
+    dt: float,
     energy_error: float,
     angmom_error: float,
     energy_drift: float,
     angmom_drift: float,
     period_mult: int,
 ) -> float:
-    dt_score = min(stable_dt / max(0.50 * local_time, 1e-12), 1.0)
-    energy_score = float(np.exp(-energy_error / 0.01))
-    angmom_score = float(np.exp(-angmom_error / 0.01))
-    drift_score = float(np.exp(-(energy_drift + angmom_drift) / 0.005))
+    """
+    Score an integrator by balancing timestep size against
+    short- and long-horizon conservation error.
+    """
+    base_score = dt
 
-    if period_mult <= 5:
-        return 100.0 * (
-            0.25 * dt_score
-            + 0.30 * energy_score
-            + 0.30 * angmom_score
-            + 0.15 * drift_score
-        )
+    if period_mult >= 100:
+        error_weight = 1.0
+        drift_weight = 1000.0
+    elif period_mult > 1:
+        error_weight = 10.0
+        drift_weight = 100.0
+    else:
+        error_weight = 100.0
+        drift_weight = 10.0
 
-    return 100.0 * (
-        0.10 * dt_score
-        + 0.20 * energy_score
-        + 0.20 * angmom_score
-        + 0.50 * drift_score
-    )
+    total_error_penalty = (energy_error + angmom_error) * error_weight
+    total_drift_penalty = (energy_drift + angmom_drift) * drift_weight
 
+    return base_score / (1.0 + total_error_penalty + total_drift_penalty)
 
 def find_dt_by_combined_metrics(
     integrator_name: str,
@@ -123,7 +160,7 @@ def find_dt_by_combined_metrics(
 
     for dt in dt_candidates:
         _, _, energy, angmom, _, times = run_sim_diagnostics(
-            step_func, start_state, float(dt), limit_t, perturb_eps, max_steps=500000
+            step_func, start_state, float(dt), limit_t, perturb_eps, max_steps=500000, track={"energy", "angmom", "times"}
         )
 
         if len(times) < 2 or times[-1] < 0.95 * limit_t:
@@ -142,9 +179,9 @@ def find_dt_by_combined_metrics(
         energy_drift_short = float(abs((energy_arr[-1] - energy0) / energy_scale))
         angmom_drift_short = float(abs((angmom_arr[-1] - angmom0) / angmom_scale))
 
-        stress_time = min(max(limit_t, 20.0 * orbit_period), 200.0 * orbit_period)
+        stress_time = min(max(limit_t, 20.0 * orbit_period), 1000.0 * orbit_period)
         _, _, energy_long, angmom_long, _, times_long = run_sim_diagnostics(
-            step_func, start_state, float(dt), stress_time, perturb_eps, max_steps=500000
+            step_func, start_state, float(dt), stress_time, perturb_eps, max_steps=500000, track={"energy", "angmom", "times"}
         )
 
         if len(times_long) < 2:
@@ -176,7 +213,6 @@ def find_dt_by_combined_metrics(
 
         score = combined_performance_score(
             float(dt),
-            float(local_time),
             energy_error,
             angmom_error,
             energy_drift,
