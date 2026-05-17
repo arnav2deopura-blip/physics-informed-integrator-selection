@@ -71,6 +71,7 @@ def add_orbit_features(dataframe: pd.DataFrame) -> pd.DataFrame:
     period[bound] = 2.0 * np.pi * np.sqrt(semi_major_axis**3 / GM)
     dataframe["period"] = period
 
+    dataframe["orbit_count"] = dataframe["sim-time"] / np.maximum(dataframe["period"], 1e-12)
     return dataframe
 
 
@@ -146,15 +147,35 @@ def run_sim_diagnostics(
     limit_t: float,
     perturb_eps: float = 0.0,
     max_steps: int = 1000000,
+    track: set[str] | None = None,
+    compute_stats_only: bool = False,
 ) -> tuple[list[float], list[float], list[float], list[float], list[float], list[float]]:
+    if track is None:
+        track = {"path_x", "path_y", "energy", "angmom", "radii", "times"}
+    
     curr_time = 0.0
     state = start_state[:]
-    path_x = [state[0]]
-    path_y = [state[1]]
-    energy = [get_energy(state, perturb_eps)]
-    angmom = [get_angular_momentum(state)]
-    radii = [radius(state[0], state[1])]
-    times = [0.0]
+    path_x = [state[0]] if "path_x" in track else []
+    path_y = [state[1]] if "path_y" in track else []
+    radii = [radius(state[0], state[1])] if "radii" in track else []
+    times = [0.0] if ("times" in track and not compute_stats_only) else []
+    
+    # For energy/angmom: either store full lists OR compute stats only
+    if compute_stats_only and ("energy" in track or "angmom" in track):
+        energy_0 = get_energy(state, perturb_eps)
+        angmom_0 = get_angular_momentum(state)
+        energy_max_dev = 0.0
+        angmom_max_dev = 0.0
+        energy = [energy_0]
+        angmom = [angmom_0]
+    else:
+        energy = [get_energy(state, perturb_eps)] if "energy" in track else []
+        angmom = [get_angular_momentum(state)] if "angmom" in track else []
+        energy_0 = energy[0] if energy else 0.0
+        angmom_0 = angmom[0] if angmom else 0.0
+        energy_max_dev = 0.0
+        angmom_max_dev = 0.0
+    
     step_count = 0
 
     while curr_time < limit_t and step_count < max_steps:
@@ -164,13 +185,43 @@ def run_sim_diagnostics(
         if r_now < COLLISION_RADIUS or r_now > 50.0 or not np.all(np.isfinite(state)):
             break
 
-        path_x.append(state[0])
-        path_y.append(state[1])
-        energy.append(get_energy(state, perturb_eps))
-        angmom.append(get_angular_momentum(state))
-        radii.append(r_now)
+        if "path_x" in track:
+            path_x.append(state[0])
+        if "path_y" in track:
+            path_y.append(state[1])
+        if "radii" in track:
+            radii.append(r_now)
+        
+        if "energy" in track:
+            e_val = get_energy(state, perturb_eps)
+            if compute_stats_only:
+                energy_scale = max(abs(energy_0), 1e-12)
+                dev = abs((e_val - energy_0) / energy_scale)
+                energy_max_dev = max(energy_max_dev, dev)
+            else:
+                energy.append(e_val)
+        
+        if "angmom" in track:
+            l_val = get_angular_momentum(state)
+            if compute_stats_only:
+                angmom_scale = max(abs(angmom_0), 1e-12)
+                dev = abs((l_val - angmom_0) / angmom_scale)
+                angmom_max_dev = max(angmom_max_dev, dev)
+            else:
+                angmom.append(l_val)
+        
         curr_time += dt_val
-        times.append(curr_time)
+        if "times" in track and not compute_stats_only:
+            times.append(curr_time)
         step_count += 1
+
+    # If using stats-only mode, append the max deviations to return lists
+    if compute_stats_only:
+        if "energy" in track:
+            energy.append(energy_max_dev)
+        if "angmom" in track:
+            angmom.append(angmom_max_dev)
+        if "times" in track:
+            times = [0.0, curr_time]
 
     return path_x, path_y, energy, angmom, radii, times
