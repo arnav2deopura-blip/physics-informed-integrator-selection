@@ -1,0 +1,350 @@
+\documentclass[12pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[american]{babel}
+\usepackage{amsmath,amssymb,graphicx,booktabs}
+\usepackage{subcaption}
+\usepackage{placeins}
+\usepackage{csquotes}
+\usepackage{setspace}
+\usepackage{caption}
+\usepackage[backend=biber,style=numeric,sorting=none,giveninits=true,maxbibnames=99,doi=true,url=true,isbn=false]{biblatex}
+\DeclareFieldFormat{labelnumberwidth}{#1.}
+\DeclareFieldFormat[article]{journaltitle}{#1}
+\DeclareFieldFormat[article]{title}{#1}
+\captionsetup{font=small,labelfont=bf,skip=3pt}
+\captionsetup[subfigure]{font=small}
+\setlength{\textfloatsep}{10pt plus 2pt minus 2pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+\setlength{\intextsep}{8pt plus 2pt minus 2pt}
+\renewcommand*{\multinamedelim}{\addcomma\space}
+\renewcommand*{\finalnamedelim}{\addcomma\space}
+\DeclareBibliographyDriver{article}{%
+	\printnames{author}%
+	\setunit{\addperiod\space}%
+	\printfield{title}%
+	\setunit{\addperiod\space}%
+	\printfield{journaltitle}%
+	\setunit{\addperiod\space}%
+	Vol.~\printfield{volume}%
+	\iffieldundef{number}{}{, no.~\printfield{number}}%
+	\iffieldundef{pages}{}{, pg.~\printfield{pages}}%
+	\setunit{\addcomma\space}%
+	\printfield{year}%
+	\iffieldundef{doi}
+	{\addperiod}
+	{,\space\url{https://doi.org/\thefield{doi}}\addperiod}%
+	\finentry
+}
+\DeclareBibliographyDriver{book}{%
+  \printnames{author}%
+  \setunit{\addperiod\space}%
+  \mkbibemph{\printfield{title}}%
+  \setunit{\addperiod\space}%
+  \printfield{publisher}%
+  \setunit{\addperiod\space}%
+  \printfield{year}%
+  \iffieldundef{doi}
+    {\addperiod}
+    {,\space\url{https://doi.org/\thefield{doi}}\addperiod}%
+  \finentry
+}
+\addbibresource{references.bib}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+
+\singlespacing
+
+\usepackage{authblk} % Put this right above \title
+
+\title{A Physics-Informed Random Forest for Selecting Stable Timesteps in Two-Body Orbital Simulations}
+\author{Arnav Deopura}
+\affil{Green Hope High School, Cary, North Carolina, 27519}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Background/Objective: Selecting a numerical integrator and timestep for orbital simulations is often done by trial and error, which becomes expensive when many initial conditions must be tested. This study asks whether a physics-informed machine-learning model can predict the most stable and efficient choice before a full simulation is run. Methods: We generated 19,380 usable planar two-body orbits in normalized units with $GM=1$, then labeled each case by the largest timestep that kept both relative energy and relative angular momentum errors below 1\% for forward Euler, classical fourth-order Runge--Kutta (RK4), and leapfrog. The model was trained on raw state variables and on physics-informed features including eccentricity, orbital period, and orbit count. Results: Adding the physics-aware feature set improved RK4 prediction on the standard test split from $R^2 = 0.9735$ and MAE $= 0.02555$ to $R^2 = 0.9857$ and MAE $= 0.01836$, and on the hardest 20\% of orbits from $R^2 = 0.9267$ and MAE $= 0.04111$ to $R^2 = 0.9643$ and MAE $= 0.03000$. When the three predicted timesteps were converted into a single integrator choice by selecting the largest value, the model chose the correct integrator 97.7\% of the time. Conclusions: RK4 was the best overall method in this dataset, while leapfrog remained competitive in longer simulations where long-term conservation mattered more. The approach reduced brute-force search time by about 35$\times$, showing that physics-aware surrogate models can make integrator selection faster, more interpretable, and more practical for orbital workflows.
+\end{abstract}
+
+\noindent\textbf{Keywords:} orbital mechanics, numerical integration, random forests, physics-informed machine learning, algorithm selection
+
+\section{Introduction}
+Orbital mechanics is a useful setting for numerical analysis because the underlying physics is simple enough to write down, yet sensitive enough that poor timestepping quickly becomes visible. Although the ideal two-body problem has a closed-form Keplerian solution, finite-step simulations are still essential in practice, both because real workflows discretize the equations of motion and because more realistic perturbations eventually make analytic solutions impractical\supercite{curtis2020,bate1971,battin1999,vallado2022,roy2005}. In a planar two-body model, the orbiting body is described by the state vector $\mathbf{z} = [x, y, v_x, v_y]^\top$, and the motion follows the inverse-square law. The specific energy, meaning energy per unit mass, and angular momentum are conserved in the exact problem, so they are natural diagnostics for judging whether a numerical method remains physically faithful.
+
+Numerical integrators can be grouped into explicit and implicit methods, fixed-step and adaptive methods, and structure-preserving methods. Explicit schemes compute the next state directly from known values, implicit schemes require solving an equation at each step, adaptive methods change the step size during the run, and symplectic methods are designed for Hamiltonian systems, meaning systems whose energy can be written as kinetic plus potential energy and whose phase-space geometry should be preserved over time. Phase space is the combined position-velocity space of a system, so preserving its structure often helps long-term simulations stay physically meaningful\supercite{hairer1993,press2007,butcher1996,hairer2006,leimkuhler2004}.
+
+For the planar gravitational system studied here, the equations of motion are expressed as a system of first-order differential equations:
+\begin{align}
+	\dot{x} &= v_x, \label{eq:x_dot} \\
+	\dot{y} &= v_y, \label{eq:y_dot} \\
+	\dot{v}_x &= -\frac{GMx}{r^3}, \label{eq:vx_dot} \\
+	\dot{v}_y &= -\frac{GMy}{r^3}, \label{eq:vy_dot}
+\end{align}
+where the radial distance from the central body is defined as $r = \sqrt{x^2+y^2}$. The specific energy $E$ and specific angular momentum $L$ serve as the foundational conserved quantities of this continuous system, calculated via Eq.~\eqref{eq:energy} and Eq.~\eqref{eq:angmom}:
+\begin{align}
+	E &= \frac{1}{2}\left(v_x^2+v_y^2\right) - \frac{GM}{r}, \label{eq:energy} \\
+	L &= x v_y - y v_x. \label{eq:angmom}
+\end{align}
+
+The three integrators compared in this study are Euler, classical fourth-order Runge--Kutta (RK4), and leapfrog. Euler updates the state with one slope estimate per step,
+\begin{equation}
+    \mathbf{z}_{n+1} = \mathbf{z}_n + h f(\mathbf{z}_n),
+\end{equation}
+where $h$ is the timestep and $f$ is the right-hand side of the differential equation. RK4 uses four slope estimates per step:
+\begin{align}
+    k_1 &= f(\mathbf{z}_n), \\
+    k_2 &= f\!\left(\mathbf{z}_n + \frac{h}{2}k_1\right), \\
+    k_3 &= f\!\left(\mathbf{z}_n + \frac{h}{2}k_2\right), \\
+    k_4 &= f\!\left(\mathbf{z}_n + h k_3\right),
+\end{align}
+with the update rule
+\begin{equation}
+    \mathbf{z}_{n+1} = \mathbf{z}_n + \frac{h}{6}(k_1 + 2k_2 + 2k_3 + k_4).
+\end{equation}
+Leapfrog, usually written in a kick-drift-kick form, updates velocity by a half-step, position by a full step, and then velocity again:
+\begin{align}
+    \mathbf{v}_{n+\frac{1}{2}} &= \mathbf{v}_n + \frac{h}{2}\mathbf{a}(\mathbf{x}_n), \\
+    \mathbf{x}_{n+1} &= \mathbf{x}_n + h\,\mathbf{v}_{n+\frac{1}{2}}, \\
+    \mathbf{v}_{n+1} &= \mathbf{v}_{n+\frac{1}{2}} + \frac{h}{2}\mathbf{a}(\mathbf{x}_{n+1}),
+\end{align}
+where $\mathbf{x} = (x,y)$, $\mathbf{v} = (v_x,v_y)$, and $\mathbf{a}(\mathbf{x}) = -GM\,\mathbf{x}/r^3$.
+
+The key difference among these methods is not just cost, but structure. Euler is first-order, so its step-by-step error shrinks slowly as the timestep decreases. RK4 is fourth-order, so its error decreases much faster for the same step size. Leapfrog is second-order, but it is symplectic and time-reversible, which often makes it better at keeping long-term invariants bounded even when its short-term position error is not the smallest\supercite{hairer2006,leimkuhler2004,butcher1996}. These differences matter especially in long orbital integrations, where small local errors can accumulate into secular drift, meaning a slow, systematic departure from the true energy or angular momentum. Classical symplectic integration work showed that carefully composed maps can achieve higher order while still preserving the geometric structure of the motion, and these ideas became central in celestial mechanics and planetary dynamics\supercite{ruth1983,forest1990,yoshida1990,wisdom1991}. More recent studies have continued to examine round-off effects, coordinate dependence, and long-term accuracy, showing that a method's quality cannot be judged only by how smooth the orbit looks over a short interval\supercite{chambers2019,rein2019}.
+
+This study sits at the intersection of algorithm selection and scientific machine learning. In many orbital workflows, the choice of integrator and timestep is still made by experience, rule of thumb, or repeated trial runs, even though those choices can strongly affect both runtime and physical fidelity. That is expensive when the same type of orbit must be evaluated many times. Surrogate modeling offers a faster alternative: rather than running a full brute-force search for each new case, a model can learn from previously solved examples and predict the most promising method before the simulation begins. Recent work in physics-informed learning and benchmark design supports this direction, but few studies have asked whether a model can recommend both the best integrator and the largest stable timestep for a specific orbital initial condition\supercite{ghattas2021,karniadakis2021,raissi2019,kerschke2019,thiyagalingam2022}.
+
+Random forests are a practical choice for this problem because they combine many decision trees, capture nonlinear feature interactions, and require little preprocessing. Breiman's original work introduced the method, and later implementations made it a standard tool for both classification and regression\supercite{breiman2001,liaw2002}. At the same time, random forest feature importance should be treated carefully, because the scores describe how the model uses the data rather than proving that one variable causes the outcome; bias can appear when predictors are correlated or measured on different scales\supercite{strobl2007}. Against this background, the research question becomes direct: can a machine-learning model predict, before a simulation is run, which integrator will remain stable at the largest timestep for a given orbit?
+
+To test that idea, this study focuses on planar, bound two-body orbits in normalized units with $GM=1$. It labels each case by the largest timestep that keeps relative energy and angular momentum errors below a fixed threshold, then trains a random forest on both raw state variables and physics-informed descriptors such as eccentricity, orbital period, and orbit count. Eccentricity measures how elongated an orbit is, orbital period sets the natural timescale, and orbit count measures how many periods the simulation spans. The scope is intentionally narrow so that the relationship between orbit geometry and numerical stability can be isolated cleanly; it does not attempt to replace specialized methods for perturbed, multi-body, or relativistic systems. The central hypothesis is that a physics-informed surrogate can reduce brute-force search and provide a fast, interpretable recommendation for integrator choice and timestep.
+
+\section{Methods}
+
+\subsection{Overview}
+The goal of this project was to predict the best numerical integrator and its optimal timestep without running a full brute-force simulation first. To do that, we built a simulation pipeline, generated training data, trained a random forest model, and evaluated the results with plots, benchmark cases, and ablation studies. All simulations and analyses were implemented in Python 3 with NumPy, pandas, SciPy, Matplotlib, scikit-learn, and joblib. Because each orbit evaluation is independent, the expensive parts of the pipeline were parallelized across roughly half of the available CPU cores to keep the runtime practical.
+
+\subsection{Orbital Mechanics and Physics Setup}
+The gravitational systems modeled in this study were two-body systems with a standard gravitational parameter of $GM=1$ in natural units. Using natural units simplifies the equations without changing the underlying dynamics, which makes the analysis easier to interpret. The central body was fixed at the origin, and the orbiting body's state was represented by the four-component vector $\left[x, y, v_x, v_y\right]$.
+
+For a bound orbit, the specific energy is negative:
+\begin{equation}
+    E = \frac{1}{2}\left(v_x^2+v_y^2\right) - \frac{GM}{r} < 0.
+\end{equation}
+This condition was used to keep only orbits for which the orbital period is well defined.
+
+\subsection{Numerical Integrators and Label Construction}
+To generate the target labels, three standard numerical integrators were implemented: forward Euler, classical fourth-order Runge--Kutta (RK4), and leapfrog. For each orbit, the search aimed to find the largest timestep $\Delta t$ that allowed the simulation to complete while keeping both the maximum relative energy error and the maximum relative angular momentum error below 1\%.
+
+Relative error for any quantity $Q$ was defined as
+\begin{equation}
+    \varepsilon_Q = \max_t \left|\frac{Q(t)-Q_0}{Q_0}\right|,
+\end{equation}
+where $Q_0$ is the initial value. This gives a continuous timestep target for each integrator rather than a simple pass-fail label.
+
+The search began from a timestep based on the local dynamical timescale,
+\begin{equation}
+    t_K \propto \sqrt{\frac{r^3}{GM}},
+\end{equation}
+and was then refined by repeated halving and upward checks. If no timestep in the search range satisfied the stability criterion, the integrator was assigned a fallback value of $10^{-4}$, representing failure to find a usable stable step.
+
+\subsection{Training Data Generation}
+We generated 20,000 random orbits in normalized units by sampling $v_x \in [-0.5, 0.5]$, $v_y \in [0.3, 1.2]$, and $r \in [0.5, 2.0]$. Only bound orbits with negative total energy were retained, because the orbital period is only well defined for bound trajectories. The simulation length was then chosen as a log-uniform multiple of the orbital period, with four broad ranges spanning approximately 0.05 to 300 orbits. This ensured that the dataset included very short, moderate, and very long simulations instead of being dominated by one timescale. Rows for which all three integrators failed were discarded, leaving 19,380 usable examples.
+
+\subsection{Physics-Informed Features}
+Each orbit was first represented by the raw variables $\left[v_x, v_y, r, t_{\mathrm{sim}}\right]$. Physics-informed features were then added: eccentricity $e$, orbital period $P$, and orbit count $t_{\mathrm{sim}}/P$.
+
+These quantities were computed from the initial state using
+\begin{align}
+    L &= x v_y - y v_x, \\
+    E &= \frac{1}{2}\left(v_x^2+v_y^2\right) - \frac{GM}{r}, \\
+    e &= \sqrt{1 + \frac{2EL^2}{(GM)^2}}, \\
+    a &= -\frac{GM}{2E}, \\
+    P &= 2\pi \sqrt{\frac{a^3}{GM}}.
+\end{align}
+The derived features were included because they encode the orbit's shape, its natural dynamical timescale, and how many periods the simulation covers, all of which are directly relevant to numerical stability. Orbit count is particularly useful because it helps the model distinguish between a short run and a long run that starts from the same initial state.
+
+\subsection{Machine Learning Model}
+The prediction model was a multi-output random forest regressor trained to map the feature vector to the three target timesteps,
+\begin{equation}
+    \left[\Delta t_{\mathrm{Euler}}, \Delta t_{\mathrm{RK4}}, \Delta t_{\mathrm{Leapfrog}}\right].
+\end{equation}
+The recommended integrator was then defined as the one with the largest predicted stable timestep, because the method that can take the largest stable step is usually the most efficient for a fixed accuracy threshold.
+
+The model used 100 trees in evaluation experiments and 200 trees for the final saved model. Because random forests split on feature thresholds rather than distances, the model did not require feature normalization. The forest also provided impurity-based feature importance scores and tree-to-tree prediction variance as internal diagnostics.
+
+\subsection{Evaluation and Benchmarking}
+The model was evaluated with a 70/30 train-test split. To check that the results were not dependent on one favorable split, the feature-ablation study was repeated over 20 random seeds and reported as mean plus or minus standard deviation. The main regression metrics were $R^2$ and mean absolute error (MAE), and the model was also evaluated by checking whether the integrator with the largest predicted timestep matched the true best integrator.
+
+To test extrapolation to difficult orbits, the highest-eccentricity 20\% of the dataset was held out as a separate test set. The learned model was also compared against two simple RK4 baseline rules, one proportional to orbital period and one proportional to the Keplerian timescale $\sqrt{r^3/GM}$, to determine whether the machine-learning model captured more than a simple scaling law.
+
+Separately, an 800-case benchmark was constructed to stress-test the integrators. It covered five dynamical regimes, ten simulation durations, and 16 repeats per regime-duration combination. The benchmark was sampled in eccentricity-periapsis space rather than Cartesian state space so that each regime could be controlled deliberately. The regimes were low-eccentricity, mid-eccentricity, high-eccentricity, near-parabolic, and near-collision, with regime-specific ranges of eccentricity and periapsis. For each benchmark orbit, $(e,q)$ was converted to an initial periapsis state using the vis-viva relation. In 35\% of benchmark cases, a small perturbation term of $\epsilon = 0.002$ was included so that the integrators were tested on slightly non-ideal dynamics. Each benchmark case received a composite score that rewarded larger timesteps but penalized both peak conservation error and final long-term drift. Peak error was the maximum deviation during the run, while drift was the final deviation at the end of the run. The weights were adjusted by simulation length, with short runs emphasizing error and long runs emphasizing drift, so the score reflected both efficiency and long-term stability. This benchmark was used to compare integrators, not to train the random forest.
+
+\subsection{Computational Implementation}
+All simulations, data generation, model fitting, and figure generation were written in Python. The main train-test split and final model used a fixed random state of 42, and the feature-ablation study repeated over 20 seeds to estimate variation across splits. The code and analysis scripts are publicly available in the project GitHub repository, which supports reproducibility and allows the full pipeline to be rerun from the raw data and saved scripts.
+
+Because this study used only simulated orbital data and did not involve human participants, animal subjects, or private data, no ethical approval or informed consent was required.
+
+\section{Results}
+
+Overall, the experiments showed a clear separation between the three numerical integrators. From 20,000 candidate orbits, 19,380 usable examples remained after removing cases where no method met the stability criteria. Euler failed to find a stable timestep in 72.9\% of candidates, compared with 3.0\% for RK4 and 6.2\% for leapfrog. That large gap indicates that Euler is much less reliable for this orbital problem, while RK4 and leapfrog are far more stable.
+
+\subsection{Integrator Stability and Conservation}
+In direct trajectory tests, Euler drifted visibly away from the expected orbit, while RK4 and leapfrog stayed much closer to the intended path (Figure~\ref{fig:stability-conservation}). The short-term energy plot showed the same pattern: Euler accumulated the largest relative energy error, RK4 kept the smallest short-term energy error overall, and leapfrog showed bounded oscillations rather than steady growth. Over longer runs, the methods separated even more clearly. In a representative case, leapfrog preserved angular momentum to around $10^{-14}$ relative error, RK4 stayed near $10^{-6}$, and Euler remained around $10^{-4}$. For energy drift across 1, 10, 30, and 100 orbital periods, RK4 had the smallest final error, while Euler and leapfrog accumulated much larger drift in this setup. This reveals an important tradeoff: RK4 was the best general-purpose method in this dataset, while leapfrog was especially strong at preserving angular momentum over long times.
+
+\begin{figure}[!htbp]
+    \centering
+    \begin{subfigure}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_01_trajectories.png}
+        \caption{Trajectories}
+    \end{subfigure}\hfill
+    \begin{subfigure}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_02_energy_stability.png}
+        \caption{Short-term energy}
+    \end{subfigure}
+
+    \vspace{0.4em}
+
+    \begin{subfigure}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_10_momentum_conservation.png}
+        \caption{Angular momentum}
+    \end{subfigure}\hfill
+    \begin{subfigure}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_11_long_term_drift.png}
+        \caption{Long-term drift}
+    \end{subfigure}
+    \caption{Integrator stability and conservation diagnostics at ML-selected timesteps. Euler drifts most strongly, RK4 is the most accurate short-term method, and leapfrog preserves angular momentum best over long integrations.}
+    \label{fig:stability-conservation}
+\end{figure}
+
+\FloatBarrier
+
+\subsection{Timestep Sensitivity and Scaling}
+The timestep sensitivity tests confirmed the expected numerical behavior (Figure~\ref{fig:timestep-sensitivity}). On the logarithmic error plot for an eccentric orbit ($e \approx 0.35$), the error decreased with approximately first-order behavior for Euler, second-order behavior for leapfrog, and fourth-order behavior for RK4. In practical terms, RK4's error fell fastest as the timestep was reduced. The brute-force scaling test also showed that the largest stable RK4 timestep increased almost linearly with $r^{1.5}$, which matches Keplerian scaling, meaning the orbit's natural period is a major factor in stability. The stability map showed the same kind of smooth dependence on the initial state rather than random variation.
+
+\begin{figure}[!htbp]
+    \centering
+    \begin{subfigure}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_03_stability_map.png}
+        \caption{Stable timestep map}
+    \end{subfigure}\hfill
+    \begin{subfigure}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_04_keplerian_scaling.png}
+        \caption{Keplerian scaling}
+    \end{subfigure}
+
+    \vspace{0.4em}
+
+    \begin{subfigure}[t]{0.95\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_05_step_sensitivity.png}
+        \caption{Convergence order}
+    \end{subfigure}
+    \caption{Timestep sensitivity and orbital scaling. The stable RK4 timestep tracks the local Keplerian timescale, and the observed error slopes match the expected order of each integrator.}
+    \label{fig:timestep-sensitivity}
+\end{figure}
+
+\FloatBarrier
+
+\subsection{Benchmark Comparison}
+On the 800-case benchmark, RK4 won 87.9\% of cases under the combined score, leapfrog won 7.9\%, and Euler won 4.2\% (Figure~\ref{fig:benchmark-comparison}). The composite score intentionally balanced efficiency and physical fidelity: larger timesteps reduce runtime, but a timestep that is too large can destroy conservation, so both peak error and long-term drift were penalized. The weighting was also made duration-dependent because short simulations are governed more by peak error, while long simulations are governed more by accumulated drift. Under that criterion, RK4 dominated the ultra-short, short, and medium-duration groups, while leapfrog became more competitive only in long, low-eccentricity regimes where long-term conservation mattered more.
+
+\begin{figure}[!htbp]
+    \centering
+    \begin{subfigure}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_09_performance_by_ecc.png}
+        \caption{Score by eccentricity}
+    \end{subfigure}\hfill
+    \begin{subfigure}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_12_error_vs_ecc.png}
+        \caption{Peak error by eccentricity}
+    \end{subfigure}
+
+    \vspace{0.4em}
+
+    \begin{subfigure}[t]{0.95\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_13_winner_heatmap.png}
+        \caption{Best integrator by regime and duration}
+    \end{subfigure}
+    \caption{Benchmark comparison across eccentricity and simulation length. RK4 remains the strongest overall method, but performance degrades as eccentricity increases and leapfrog becomes competitive in a small subset of long-duration, low-eccentricity cases.}
+    \label{fig:benchmark-comparison}
+\end{figure}
+
+\FloatBarrier
+
+\subsection{Machine Learning Performance}
+The random forest model improved when physics-informed features were added (Figure~\ref{fig:ml-diagnostics}). Across 20 random seeds, the RK4 target improved from $R^2 = 0.9735 \pm 0.0016$ and MAE $= 0.02555 \pm 0.00054$ to $R^2 = 0.9857 \pm 0.0015$ and MAE $= 0.01836 \pm 0.00059$, showing that the gains were consistent rather than isolated to one split. On the hardest 20\% of orbits, defined by eccentricity, the same change improved RK4 prediction from $R^2 = 0.9267$ and MAE $= 0.04111$ to $R^2 = 0.9643$ and MAE $= 0.03000$.
+
+Even after fitting simple baseline rules on the training data, the tuned period rule and Kepler-scaling rule were far less accurate than the model, with MAEs of 0.28902 and 0.24449 versus 0.01785 for the random forest. When the three predicted timesteps were converted into a single integrator choice by selecting the largest one, the model chose the correct integrator 97.7\% of the time on the held-out set, with an approximate 95\% confidence interval of 97.3\% to 98.1\%. That is only 2.1 percentage points better than always choosing RK4, but it is still meaningful because the model recovered the cases where another method was better.
+
+The feature analysis helps explain why the physics-aware model worked better. Orbit count, meaning the number of orbital periods simulated, was the most important input at 0.456, followed by orbital period at 0.197, while raw simulation time contributed very little at 0.007 once those derived quantities were included. These importance values are descriptive rather than causal, because they show which variables the forest used most, not which variables physically cause the outcome. The uncertainty map shows the same general pattern, with tree-to-tree disagreement lowest in the easier parts of state space and larger where orbital behavior is more varied. The learning curves show diminishing returns from extra data: prediction error drops quickly at small training sizes and then improves more gradually after several thousand orbits, while the spread between trees also narrows (Figure~\ref{fig:learning-curves}). Finally, the full ML prediction step averaged 38 milliseconds, compared with 1.33 seconds for brute-force search across the same sample, a speedup of roughly 35$\times$.
+
+\begin{figure}[!htbp]
+    \centering
+    \begin{subfigure}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_06_uncertainty_map.png}
+        \caption{Prediction uncertainty}
+    \end{subfigure}\hfill
+    \begin{subfigure}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_07_feature_improvement.png}
+        \caption{Feature-set improvement}
+    \end{subfigure}
+
+    \vspace{0.4em}
+
+    \begin{subfigure}[t]{0.95\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_08_feature_importance.png}
+        \caption{Feature importance}
+    \end{subfigure}
+    \caption{Machine-learning diagnostics. Physics-informed features improve RK4 prediction, tree-to-tree disagreement is largest in harder regions of state space, and orbit count is the strongest predictor once derived orbital features are included.}
+    \label{fig:ml-diagnostics}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \begin{subfigure}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_14_error_vs_size.png}
+        \caption{Prediction error}
+    \end{subfigure}\hfill
+    \begin{subfigure}[t]{0.48\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/fig_15_variance_vs_size.png}
+        \caption{Prediction variance}
+    \end{subfigure}
+    \caption{Learning curves versus training-set size. Both prediction error and inter-tree variance decrease rapidly at small sample sizes and then flatten, indicating diminishing returns from additional training orbits.}
+    \label{fig:learning-curves}
+\end{figure}
+
+\FloatBarrier
+
+\section{Discussion}
+This study set out to answer a simple but important question: can a physics-aware machine-learning model predict the best numerical integrator and its largest stable timestep before running a full simulation? Within the limits of this orbital system, the answer is yes. RK4 was the strongest overall method in the dataset, winning 87.9\% of the benchmark cases and producing the best balance of accuracy, stability, and efficiency. Leapfrog was less often the top choice overall, but it remained valuable in longer runs because it preserved angular momentum exceptionally well. Euler, by comparison, was consistently the weakest and failed to produce a usable stable timestep for most candidate orbits. Taken together, these results directly answer the research question and support the project's main objective: to predict the best integrator and timestep without brute-force trial and error.
+
+The larger significance is that the model did not succeed by ignoring physics. It worked better when it was given features that describe orbital behavior, especially eccentricity, orbital period, and orbit count. Orbit count matters most because it directly measures how many orbital cycles the solver must survive, and accumulated numerical error grows with the number of cycles rather than with raw elapsed time alone. Orbital period matters because the same wall-clock duration can correspond to very different numbers of orbital periods depending on the orbit size. Eccentricity also makes prediction harder because motion near periapsis is faster and more nonlinear, so the solver must resolve sharper changes in acceleration. These patterns suggest that the model is learning physically meaningful timescales rather than merely memorizing inputs.
+
+Leapfrog's competitiveness in long simulations is also consistent with its symplectic structure. Symplectic methods preserve the geometry of Hamiltonian phase space, so they tend to keep long-term energy and angular momentum errors bounded instead of letting them drift steadily. Leapfrog is also time-reversible, which helps it perform well in conservative gravitational systems. RK4 is not symplectic, so its excellent short-term accuracy does not automatically guarantee the same long-term structural behavior, even though its higher order makes it the best general-purpose method for the short and medium runs tested here. This distinction is important because it explains why RK4 dominates most of the benchmark while leapfrog becomes more competitive when the simulation length is measured in many orbital periods rather than a few steps.
+
+The benchmark score was designed to reflect the same tradeoff. A smaller timestep is not always better if it makes the simulation unnecessarily expensive, and a faster timestep is not useful if it breaks conservation. Short runs were weighted toward peak error because there is little time for drift to accumulate, while long runs were weighted toward final drift because cumulative error becomes the main failure mode. That said, the score is still a design choice, not a universal law, so it should be interpreted as a reasonable and transparent evaluation rule rather than the only possible one. The main methodological limitations are the simplified two-dimensional two-body setting, the fixed gravitational parameter, and the use of a threshold-based stability definition. Additionally, because a random forest regressor outputs piecewise-constant step predictions based on leaf node averages rather than a smooth continuous function, it lacks the ability to smoothly extrapolate precisely at a strict numerical stability boundary. In practical deployment, applying a small safety buffer (e.g., $0.95 \times \Delta t_{\text{predicted}}$) to the model's output would safely protect against unexpected step-boundary clipping. These choices made the study controlled and interpretable, but they also limit direct generalization to three-dimensional or multi-body systems, adaptive methods, or problems with extra forces.
+
+Future work should extend the same framework to three-dimensional orbits, N-body systems, adaptive timestep methods, and additional integrators. It would also be useful to compare random forests with gradient boosting or neural-network surrogates and to test the approach on larger simulation suites such as REBOUND. Even with the current limitations, the main takeaway is strong: a physics-aware model can turn a slow numerical decision into a fast and interpretable recommendation without hiding the underlying mechanics. That makes the approach useful not only as a comparison of integrators, but as a practical step toward smarter numerical workflows.
+
+\section{Acknowledgments}
+No external funding was received for this study. The code supporting this project, including the simulation pipeline, data generation scripts, and model training workflow, is available in a public GitHub repository: \href{https://github.com/arnav2deopura-blip/physics-informed-integrator-selection}{GitHub repository}.
+
+\section*{References}
+\printbibliography[heading=none]
+
+\end{document}
