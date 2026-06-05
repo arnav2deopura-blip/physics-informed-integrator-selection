@@ -2,7 +2,7 @@
 
 This repository contains the code and data for my numerical analysis research project. I studied how three integrators (Euler, RK4, and leapfrog) behave on planar two-body orbits, then trained a random forest to predict the largest stable timestep for each method without running a full brute-force search every time.
 
-The full write-up is in `orbit_ml_paper.tex` and the PDF manuscript in the parent project folder. This README summarizes the science and explains how to reproduce the results.
+The full write-up is in `orbit_ml_paper.tex`. This README summarizes the science and explains how to reproduce the results.
 
 ## Why I did this
 
@@ -18,7 +18,7 @@ Can a physics-informed random forest predict the largest stable timestep for Eul
 
 I worked in normalized units with GM = 1. The central mass sits at the origin. The orbiting body is described by position and velocity (x, y, vx, vy).
 
-For each orbit I tracked specific energy E and specific angular momentum L. A simulation was considered stable when both relative energy error and relative angular momentum error stayed below 1% for the full run.
+For each orbit, I tracked specific energy E and specific angular momentum L. A simulation was considered stable when both relative energy error and relative angular momentum error stayed below 1% for the full run.
 
 I compared three integrators:
 
@@ -108,7 +108,7 @@ Running the full pipeline saves 15 figures. Together they show:
 
 ## What this project does not show
 
-This is not a proof that one integrator is always best for every orbital system. The study is limited to planar bound two-body orbits with fixed GM = 1 and a fixed 1% error threshold. The model predicts labels from a specific search procedure; it does not replace careful numerical analysis for new physics, three-dimensional motion, N-body systems, or adaptive timestep methods.
+This is not proof that one integrator is always best for every orbital system. The study is limited to planar bound two-body orbits with fixed GM = 1 and a fixed 1% error threshold. The model predicts labels from a specific search procedure; it does not replace careful numerical analysis for new physics, three-dimensional motion, N-body systems, or adaptive timestep methods.
 
 The 97.7% integrator selection accuracy is measured against labels from my own dataset, not against an independent external benchmark.
 
