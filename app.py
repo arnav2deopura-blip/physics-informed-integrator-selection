@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import joblib
 import plotly.graph_objects as go
+import urllib.request
 
 # 1. Setup paths so we scan both the root and 'src' folders safely
 ROOT = Path(__file__).resolve().parent
@@ -45,11 +46,14 @@ st.set_page_config(
 @st.cache_resource
 def load_ml_model():
     model_path = ROOT / MODEL_NAME
+    if not model_path.exists():
+        url = "https://drive.google.com/uc?export=download&id=1x3VQUxWwIEWFekePihidyMiJjMM-9iBS"
+        with st.spinner("Downloading ML model files from cloud storage..."):
+            urllib.request.urlretrieve(url, model_path)
+    
     if os.path.exists(model_path):
         return joblib.load(model_path)
     return None
-
-model = load_ml_model()
 
 
 # --- DEFINE ST.FRAGMENT FOR THE MANUAL SLIDER (PREVENTS PAGE SCROLLING JUMPS) ---
@@ -174,7 +178,7 @@ with tab1:
     2. **Classical Runge-Kutta (RK4, 4th-Order):** A highly accurate multi-stage mathematical engine. It drops energy errors significantly but requires multiple function calculations per step.
     3. **Leapfrog Integrator (2nd-Order):** A symplectic integrator. While technically lower order than RK4, it preserves the geometric phases and energy configurations of the physical system indefinitely over long runtimes.
     
-    *Switch over to the **Interactive Predictor** tab to test your own orbital conditions live!*
+    *Switch over to the Interactive Predictor tab to test your own orbital conditions live!*
     """)
 
 with tab2:
