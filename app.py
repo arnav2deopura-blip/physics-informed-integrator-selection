@@ -1,3 +1,4 @@
+Python
 import os
 import sys
 import math
@@ -7,7 +8,6 @@ import numpy as np
 import pandas as pd
 import joblib
 import plotly.graph_objects as go
-import urllib.request
 
 # 1. Setup paths so we scan both the root and 'src' folders safely
 ROOT = Path(__file__).resolve().parent
@@ -19,7 +19,6 @@ if SRC.exists() and str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 # 2. Import using the full package name. 
-# This tells Python that 'orbit_ml' is the parent, fixing the relative import error!
 import orbit_ml.config as config
 import orbit_ml.physics as physics
 
@@ -38,7 +37,7 @@ get_angular_momentum = physics.get_angular_momentum
 
 # Page Configurations (The Agency Visual Polish)
 st.set_page_config(
-    page_title="Physics-Informed ML Orbital Dashboard",
+    page_title="OrbitML: AI-Assisted Numerical Integrator Selection",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -46,16 +45,10 @@ st.set_page_config(
 # Cache the ML Model so it doesn't reload on every slider move
 @st.cache_resource
 def load_ml_model():
-    model_path = ROOT / "orbit_integrator_rf.joblib"
-    
-    # If the model file isn't in the GitHub repo, download it dynamically on the cloud server!
-    if not model_path.exists():
-        # REPLACE THIS URL WITH YOUR DIRECT DOWNLOAD LINK
-        url = "https://drive.google.com/uc?export=download&id=1x3VQUxWwIEWFekePihidyMiJjMM-9iBS"
-        with st.spinner("Downloading ML model weight files from cloud storage..."):
-            urllib.request.urlretrieve(url, model_path)
-            
-    return joblib.load(model_path)
+    model_path = ROOT / MODEL_NAME
+    if os.path.exists(model_path):
+        return joblib.load(model_path)
+    return None
 
 model = load_ml_model()
 
@@ -63,16 +56,13 @@ model = load_ml_model()
 # --- DEFINE ST.FRAGMENT FOR THE MANUAL SLIDER (PREVENTS PAGE SCROLLING JUMPS) ---
 @st.fragment
 def render_manual_simulation_block(init_state, sim_time, perturb_eps, dt_rk4):
-    # Give the user options to deliberately "break" the system
     st.markdown("---")
     st.subheader("Manual Overrides (Stress Testing)")
     st.markdown("Want to show a client or college admissions panel what happens when you don't use the AI model? Override the step sizes manually below:")
     
-    # Ensure there is a persistent placeholder tracking your manual slider adjustment
     if "user_dt" not in st.session_state:
         st.session_state.user_dt = float(dt_rk4)
 
-    # Every time the slider moves, it permanently updates the session state
     manual_dt = st.slider(
         "Force Manual Timestep Size (Δt)", 
         min_value=0.001, 
@@ -82,10 +72,8 @@ def render_manual_simulation_block(init_state, sim_time, perturb_eps, dt_rk4):
         key="manual_dt_slider"
     )
     
-    # Sync the selection to your variable
     st.session_state.user_dt = manual_dt
     
-    # Run manual stress tests
     mx, my, m_energy, _, _, m_times = physics_run_sim(
         step_rk4, 
         init_state, 
@@ -95,7 +83,6 @@ def render_manual_simulation_block(init_state, sim_time, perturb_eps, dt_rk4):
         track={"path_x", "path_y", "energy", "times"}
     )
     
-    # Calculate Energy Drift Error
     e0 = get_energy(init_state, perturb_eps)
     energy_errors = [abs((e - e0) / (e0 if e0 != 0 else 1e-12)) for e in m_energy]
 
@@ -114,23 +101,19 @@ def render_manual_simulation_block(init_state, sim_time, perturb_eps, dt_rk4):
             title="Relative Energy Error Over Time",
             xaxis_title="Time (s)",
             yaxis_title="Relative Error",
-            yaxis_type="log", # Error explodes exponentially, log scale captures it beautifully
+            yaxis_type="log", 
             template="plotly_dark"
         )
         st.plotly_chart(fig_err, use_container_width=True)
 
 
 # --- HEADER INTERFACE ---
-st.title("AI-Driven Stability Selection in Orbital Mechanics")
-st.markdown("""
-This interactive dashboard bridges Machine Learning and Numerical Analysis. 
-Adjust the initial conditions in the sidebar. A Physics-Informed Random Forest Regressor will instantly predict the maximum stable timestep (Δt) for three classic numerical integrators before running the live simulation to verify the results.
-""")
+st.title("OrbitML: AI-Assisted Integrator Selection")
+st.caption("Bridging Machine Learning and Numerical Analysis for Orbital Dynamics Verification")
 
 # --- SIDEBAR CONTROL PANEL ---
 st.sidebar.header("Initial Orbital Conditions")
 
-# Dropdown or sliders for setting initial state
 init_x = 1.0
 init_y = 0.0
 
@@ -144,78 +127,111 @@ perturb_eps = st.sidebar.slider(r"Gravitational Perturbation ($\epsilon$)", min_
 
 # --- CALCULATE INTERMEDIATE PHYSICS FEATURES ---
 r_init = math.hypot(init_x, init_y)
-# Wrap in a temporary dataframe to pass through your existing physics feature generator
 temp_df = pd.DataFrame([{
     "vx": vx, "vy": vy, "r": r_init, "sim-time": sim_time, "perturb_eps": perturb_eps
 }])
-temp_df = add_orbit_features(temp_df) # Uses your physics.py logic to compute ecc, period, etc.
+temp_df = add_orbit_features(temp_df) 
 
 eccentricity = temp_df.iloc[0]["ecc"]
 orbital_period = temp_df.iloc[0]["period"]
 orbit_count = temp_df.iloc[0]["orbit_count"]
 
+# --- NEW FEATURE: ORBIT REGIME CLASSIFICATION ---
+if eccentricity < 0.05:
+    orbit_regime = "🟢 Nearly Circular"
+elif eccentricity < 0.90:
+    orbit_regime = "🟡 Elliptical"
+elif eccentricity < 1.0:
+    orbit_regime = "🟠 Highly Eccentric (Near-Parabolic)"
+else:
+    orbit_regime = "🔴 Hyperbolic (Escape Trajectory)"
+
 # Display calculated physical metrics in the sidebar
 st.sidebar.markdown("---")
 st.sidebar.subheader("Derived Physical Properties")
+st.sidebar.markdown(f"**Classification:** {orbit_regime}")
 st.sidebar.metric(label="Calculated Eccentricity", value=f"{eccentricity:.3f}")
 st.sidebar.metric(label="Orbital Period ($T$)", value=f"{orbital_period:.2f} s")
 st.sidebar.metric(label="Total Target Orbits", value=f"{orbit_count:.1f}")
 
-# --- SECTION 1: AI PREDICTIONS ---
-st.subheader("Machine Learning Timestep Recommendations")
+# Add clean footer links for portfolios
+st.sidebar.markdown("---")
+st.sidebar.markdown("🔗 **Links:** [GitHub Repo](https://github.com/) | [Documentation](https://github.com/)")
 
-if model is None:
-    st.error(f"Could not find `{MODEL_NAME}`. Run `python run_study.py` first to train and save the model.")
-else:
-    # Prepare inputs exactly how your Random Forest expects them
-    features = temp_df[PHYSICS_FEATURE_COLUMNS].values
-    predictions = model.predict(features)[0] # Returns [dt_euler, dt_rk4, dt_leapfrog]
+
+# --- SETUP NAVIGATION TABS ---
+tab1, tab2, tab3 = st.tabs(["🚀 Overview & Science", "🎛️ Interactive Predictor", "📊 Model Analytics"])
+
+with tab1:
+    st.subheader("Project Background & Objectives")
+    st.markdown("""
+    ### The Core Challenge
+    In astrodynamics, evaluating complex orbits over extended periods requires numerical integration engines. If an integration timestep ($\Delta t$) chosen is too large, the system accumulates artificial numerical energy, leading to orbits that mathematically explode or unphysically collapse. Conversely, picking a timestep that is needlessly small wastes critical processing power.
     
-    dt_euler, dt_rk4, dt_leapfrog = predictions
-
-    # Create beautiful columns for metrics
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(label="Forward Euler Max Stable Δt", value=f"{dt_euler:.5f}", delta="1st Order (Unstable)")
-    with col2:
-        st.metric(label="Classical RK4 Max Stable Δt", value=f"{dt_rk4:.5f}", delta="4th Order (High Accuracy)", delta_color="inverse")
-    with col3:
-        st.metric(label="Leapfrog Max Stable Δt", value=f"{dt_leapfrog:.5f}", delta="2nd Order (Symplectic)", delta_color="off")
-
-# --- SECTION 2: LIVE SIMULATION VERIFICATION ---
-st.subheader("Live Simulation Verification")
-
-if model is not None:
-    # Run all three simulations using your backend physics.py script
-    init_state = [init_x, init_y, vx, vy]
+    ### How OrbitML Solves It
+    This platform maps initial physical orbital metrics directly to algorithmic stability boundaries. A Physics-Informed Random Forest Regressor acts as an optimization layer, instantly calculating the maximum safe timestep ($\Delta t$) for three distinct families of numerical integrators before any mathematical steps are calculated:
     
-    # Run simulations using the predicted step sizes
-    ex, ey, _, _, _, _ = physics_run_sim(step_euler, init_state, dt_euler, sim_time, perturb_eps)
-    rkx, rky, _, _, _, _ = physics_run_sim(step_rk4, init_state, dt_rk4, sim_time, perturb_eps)
-    lx, ly, _, _, _, _ = physics_run_sim(step_leapfrog, init_state, dt_leapfrog, sim_time, perturb_eps)
-
-    # Build interactive Plotly chart for the orbits
-    fig = go.Figure()
+    1. **Forward Euler (1st-Order):** A simple explicit scheme. Computationally cheap per loop, but mathematically unsuited for long-term bound orbits as it continuously introduces artificial energy.
+    2. **Classical Runge-Kutta (RK4, 4th-Order):** A highly accurate multi-stage mathematical engine. It drops energy errors significantly but requires multiple function calculations per step.
+    3. **Leapfrog Integrator (2nd-Order):** A symplectic integrator. While technically lower order than RK4, it preserves the geometric phases and energy configurations of the physical system indefinitely over long runtimes.
     
-    # Central Star / Mass
-    fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(size=15, color='gold'), name='Central Mass (GM=1)'))
-    
-    # Trajectories
-    fig.add_trace(go.Scatter(x=ex, y=ey, mode='lines', name=f'Forward Euler (Δt={dt_euler:.4f})', line=dict(dash='dot', color='red')))
-    fig.add_trace(go.Scatter(x=rkx, y=rky, mode='lines', name=f'RK4 (Δt={dt_rk4:.4f})', line=dict(color='deepskyblue', width=2.5)))
-    fig.add_trace(go.Scatter(x=lx, y=ly, mode='lines', name=f'Leapfrog (Δt={dt_leapfrog:.4f})', line=dict(color='limegreen', width=2)))
+    *Switch over to the **Interactive Predictor** tab to test your own orbital conditions live!*
+    """)
 
-    fig.update_layout(
-        title="Orbital Trajectories Comparison",
-        xaxis_title="Position X",
-        yaxis_title="Position Y",
-        height=600,
-        template="plotly_dark",
-        yaxis=dict(scaleanchor="x", scaleratio=1) # Forces 1:1 aspect ratio so circles aren't squished!
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
+with tab2:
+    st.subheader("Machine Learning Timestep Recommendations")
 
-    # --- CALL THE FRAGMENT FUNCTION HERE ---
-    # This safely executes the manual slider block without letting the whole page reset/jump
-    render_manual_simulation_block(init_state, sim_time, perturb_eps, dt_rk4)
+    if model is None:
+        st.error(f"Could not find `{MODEL_NAME}`. Run your training script first to save the model.")
+    else:
+        features = temp_df[PHYSICS_FEATURE_COLUMNS].values
+        predictions = model.predict(features)[0] 
+        
+        dt_euler, dt_rk4, dt_leapfrog = predictions
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(label="Forward Euler Max Stable Δt", value=f"{dt_euler:.5f}", delta="1st Order (Unstable)")
+        with col2:
+            st.metric(label="Classical RK4 Max Stable Δt", value=f"{dt_rk4:.5f}", delta="4th Order (High Accuracy)", delta_color="inverse")
+        with col3:
+            st.metric(label="Leapfrog Max Stable Δt", value=f"{dt_leapfrog:.5f}", delta="2nd Order (Symplectic)", delta_color="off")
+
+    st.subheader("Live Simulation Verification")
+
+    if model is not None:
+        init_state = [init_x, init_y, vx, vy]
+        
+        ex, ey, _, _, _, _ = physics_run_sim(step_euler, init_state, dt_euler, sim_time, perturb_eps)
+        rkx, rky, _, _, _, _ = physics_run_sim(step_rk4, init_state, dt_rk4, sim_time, perturb_eps)
+        lx, ly, _, _, _, _ = physics_run_sim(step_leapfrog, init_state, dt_leapfrog, sim_time, perturb_eps)
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(size=15, color='gold'), name='Central Mass (GM=1)'))
+        fig.add_trace(go.Scatter(x=ex, y=ey, mode='lines', name=f'Forward Euler (Δt={dt_euler:.4f})', line=dict(dash='dot', color='red')))
+        fig.add_trace(go.Scatter(x=rkx, y=rky, mode='lines', name=f'RK4 (Δt={dt_rk4:.4f})', line=dict(color='deepskyblue', width=2.5)))
+        fig.add_trace(go.Scatter(x=lx, y=ly, mode='lines', name=f'Leapfrog (Δt={dt_leapfrog:.4f})', line=dict(color='limegreen', width=2)))
+
+        fig.update_layout(
+            title="Orbital Trajectories Comparison",
+            xaxis_title="Position X",
+            yaxis_title="Position Y",
+            height=600,
+            template="plotly_dark",
+            yaxis=dict(scaleanchor="x", scaleratio=1) 
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Call the standalone fragment manual section
+        render_manual_simulation_block(init_state, sim_time, perturb_eps, dt_rk4)
+
+with tab3:
+    st.subheader("Explainable AI (XAI) & Feature Mechanics")
+    st.markdown("""
+    ### Interpretability Overview
+    Rather than treating the Random Forest Regressor as a complete black box, the model maps physical conservation constants to algorithmic constraints. 
+    
+    * **Eccentricity Correlation:** As eccentricity approaches $e \to 1$, velocities at the periapsis (closest approach) spike drastically. The model actively scales down predicted stable timesteps dynamically to capture these high-acceleration phases.
+    * **Perturbation Sensitivity ($\epsilon$):** Small gravitational variations ruin long-term structural predictability. The Random Forest weights these interactions heavily when managing maximum allowed values for non-symplectic integrators.
+    """)
