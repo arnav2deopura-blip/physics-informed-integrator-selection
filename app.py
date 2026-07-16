@@ -204,12 +204,13 @@ with tab2:
 
     st.subheader("Live Simulation Verification")
 
-    if model is not None:
+if model is not None:
         init_state = [init_x, init_y, vx, vy]
         
-        ex, ey, _, _, _, _ = physics_run_sim(step_euler, init_state, dt_euler, sim_time, perturb_eps)
-        rkx, rky, _, _, _, _ = physics_run_sim(step_rk4, init_state, dt_rk4, sim_time, perturb_eps)
-        lx, ly, _, _, _, _ = physics_run_sim(step_leapfrog, init_state, dt_leapfrog, sim_time, perturb_eps)
+        # 1. Capture the energy lists (the 3rd output) instead of ignoring them
+        ex, ey, e_energy, _, _, _ = physics_run_sim(step_euler, init_state, dt_euler, sim_time, perturb_eps)
+        rkx, rky, rk_energy, _, _, _ = physics_run_sim(step_rk4, init_state, dt_rk4, sim_time, perturb_eps)
+        lx, ly, l_energy, _, _, _ = physics_run_sim(step_leapfrog, init_state, dt_leapfrog, sim_time, perturb_eps)
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(size=15, color='gold'), name='Central Mass (GM=1)'))
@@ -227,6 +228,29 @@ with tab2:
         )
         
         st.plotly_chart(fig, use_container_width=True)
+
+        # --- NEW CODE: BENCHMARK COMPARISON TABLE ---
+        st.markdown("### Algorithmic Performance Benchmark")
+        
+        # 2. Get the exact starting energy of the system
+        e0 = get_energy(init_state, perturb_eps)
+        safe_e0 = e0 if e0 != 0 else 1e-12
+        
+        # 3. Calculate relative error using the very last item [-1] in the energy arrays
+        euler_err = abs((e_energy[-1] - e0) / safe_e0)
+        rk4_err = abs((rk_energy[-1] - e0) / safe_e0)
+        leapfrog_err = abs((l_energy[-1] - e0) / safe_e0)
+        
+        # 4. Create the Pandas DataFrame
+        benchmark_data = pd.DataFrame({
+            "Integrator Method": ["Forward Euler (1st Order)", "Classical RK4 (4th Order)", "Leapfrog (Symplectic)"],
+            "Predicted Stable Δt": [f"{dt_euler:.5f}", f"{dt_rk4:.5f}", f"{dt_leapfrog:.5f}"],
+            "Final Energy Drift Error": [f"{euler_err:.2e}", f"{rk4_err:.2e}", f"{leapfrog_err:.2e}"]
+        })
+        
+        # 5. Render the table in Streamlit without the ugly index column
+        st.dataframe(benchmark_data, use_container_width=True, hide_index=True)
+        # --------------------------------------------
 
         # Call the standalone fragment manual section
         render_manual_simulation_block(init_state, sim_time, perturb_eps, dt_rk4)
