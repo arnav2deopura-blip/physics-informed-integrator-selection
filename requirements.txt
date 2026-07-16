@@ -16,3 +16,5 @@ scipy==1.17.1
 six==1.17.0
 threadpoolctl==3.6.0
 tzdata==2026.2
+streamlit
+plotly
