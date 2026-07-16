@@ -55,6 +55,7 @@ def load_ml_model():
         return joblib.load(model_path)
     return None
 
+model = load_ml_model()
 
 # --- DEFINE ST.FRAGMENT FOR THE MANUAL SLIDER (PREVENTS PAGE SCROLLING JUMPS) ---
 @st.fragment
