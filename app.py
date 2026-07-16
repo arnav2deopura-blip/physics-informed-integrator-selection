@@ -57,6 +57,7 @@ def load_ml_model():
 
 model = load_ml_model()
 
+
 # --- DEFINE ST.FRAGMENT FOR THE MANUAL SLIDER (PREVENTS PAGE SCROLLING JUMPS) ---
 @st.fragment
 def render_manual_simulation_block(init_state, sim_time, perturb_eps, dt_rk4):
@@ -236,6 +237,49 @@ with tab3:
     ### Interpretability Overview
     Rather than treating the Random Forest Regressor as a complete black box, the model maps physical conservation constants to algorithmic constraints. 
     
-    * **Eccentricity Correlation:** As eccentricity approaches $e \to 1$, velocities at the periapsis (closest approach) spike drastically. The model actively scales down predicted stable timesteps dynamically to capture these high-acceleration phases.
-    * **Perturbation Sensitivity ($\epsilon$):** Small gravitational variations ruin long-term structural predictability. The Random Forest weights these interactions heavily when managing maximum allowed values for non-symplectic integrators.
+    * **Eccentricity Correlation:** As eccentricity approaches e → 1, velocities at the periapsis (closest approach) spike drastically. The model actively scales down predicted stable timesteps dynamically to capture these high-acceleration phases.
+    * **Perturbation Sensitivity (ε):** Small gravitational variations ruin long-term structural predictability. The Random Forest weights these interactions heavily when managing maximum allowed values for non-symplectic integrators.
     """)
+    
+    st.markdown("---")
+    st.markdown("### Random Forest Feature Importance")
+    st.markdown("The chart below illustrates which physical parameters the Machine Learning model relies on most heavily when calculating the maximum stable timestep.")
+
+    # ⚠️ REPLACE THESE VALUES WITH THE NUMBERS YOU GOT IN STEP 1
+    # Ensure the order of these names matches the order of your PHYSICS_FEATURE_COLUMNS
+    feature_names = [
+        "Eccentricity", 
+        "Orbital Period", 
+        "Initial Velocity Y", 
+        "Initial Velocity X", 
+        "Simulation Time",
+        "Radius", 
+        "Perturbation"
+    ]
+    
+    importance_values = [0.08357984, 0.05824969, 0.11379373, 0.01776321, 0.08107479, 0.18621281, 0.45932593]
+
+    # Build the horizontal bar chart
+    fig_importance = go.Figure(go.Bar(
+        x=importance_values,
+        y=feature_names,
+        orientation='h',
+        marker=dict(
+            color=importance_values,
+            colorscale='Viridis', # Creates a nice color gradient based on value
+            reversescale=True
+        )
+    ))
+
+    # Format the layout to match your existing app theme
+    fig_importance.update_layout(
+        title="Relative Importance of Orbital Features",
+        xaxis_title="Importance Weight",
+        yaxis_title="Physical Feature",
+        yaxis={'categoryorder': 'total ascending'}, # Automatically sorts the bars from smallest to largest
+        template="plotly_dark",
+        height=450,
+        margin=dict(l=0, r=0, t=40, b=0)
+    )
+
+    st.plotly_chart(fig_importance, use_container_width=True)
