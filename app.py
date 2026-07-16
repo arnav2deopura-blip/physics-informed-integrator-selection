@@ -8,10 +8,13 @@ import pandas as pd
 import joblib
 import plotly.graph_objects as go
 
-# 1. Setup paths so we point to the 'src' folder (NOT inside orbit_ml)
+# 1. Setup paths so we scan both the root and 'src' folders safely
 ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 SRC = ROOT / "src"
-if str(SRC) not in sys.path:
+if SRC.exists() and str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 # 2. Import using the full package name. 
@@ -125,12 +128,12 @@ init_x = 1.0
 init_y = 0.0
 
 st.sidebar.subheader("Initial Velocities")
-vx = st.sidebar.slider("Initial Velocity X ($v_x$)", min_value=-2.0, max_value=2.0, value=0.0, step=0.05)
-vy = st.sidebar.slider("Initial Velocity Y ($v_y$)", min_value=0.1, max_value=2.5, value=1.0, step=0.05)
+vx = st.sidebar.slider(r"Initial Velocity X ($v_x$)", min_value=-2.0, max_value=2.0, value=0.0, step=0.05)
+vy = st.sidebar.slider(r"Initial Velocity Y ($v_y$)", min_value=0.1, max_value=2.5, value=1.0, step=0.05)
 
 st.sidebar.subheader("Simulation Scope")
 sim_time = st.sidebar.slider("Total Simulation Time", min_value=1.0, max_value=100.0, value=20.0, step=1.0)
-perturb_eps = st.sidebar.slider("Gravitational Perturbation ($\epsilon$)", min_value=0.0, max_value=0.01, value=0.002, step=0.0005)
+perturb_eps = st.sidebar.slider(r"Gravitational Perturbation ($\epsilon$)", min_value=0.0, max_value=0.01, value=0.002, step=0.0005)
 
 # --- CALCULATE INTERMEDIATE PHYSICS FEATURES ---
 r_init = math.hypot(init_x, init_y)
