@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import joblib
 import plotly.graph_objects as go
+import urllib.request
 
 # 1. Setup paths so we scan both the root and 'src' folders safely
 ROOT = Path(__file__).resolve().parent
@@ -45,10 +46,16 @@ st.set_page_config(
 # Cache the ML Model so it doesn't reload on every slider move
 @st.cache_resource
 def load_ml_model():
-    model_path = ROOT / MODEL_NAME
-    if os.path.exists(model_path):
-        return joblib.load(model_path)
-    return None
+    model_path = ROOT / "orbit_integrator_rf.joblib"
+    
+    # If the model file isn't in the GitHub repo, download it dynamically on the cloud server!
+    if not model_path.exists():
+        # REPLACE THIS URL WITH YOUR DIRECT DOWNLOAD LINK
+        url = "https://drive.google.com/uc?export=download&id=1x3VQUxWwIEWFekePihidyMiJjMM-9iBS"
+        with st.spinner("Downloading ML model weight files from cloud storage..."):
+            urllib.request.urlretrieve(url, model_path)
+            
+    return joblib.load(model_path)
 
 model = load_ml_model()
 
