@@ -165,7 +165,7 @@ st.sidebar.markdown("🔗 **Links:** [GitHub Repo](https://github.com/) | [Docum
 
 
 # --- SETUP NAVIGATION TABS ---
-tab1, tab2, tab3 = st.tabs(["🚀 Overview & Science", "🎛️ Interactive Predictor", "📊 Model Analytics"])
+tab1, tab2, tab3 = st.tabs(["Overview & Science", "Interactive Predictor", "Model Analytics"])
 
 with tab1:
     st.subheader("Project Background & Objectives")
@@ -204,7 +204,7 @@ with tab2:
 
     st.subheader("Live Simulation Verification")
 
-if model is not None:
+    if model is not None:
         init_state = [init_x, init_y, vx, vy]
         
         # 1. Capture the energy lists (the 3rd output) instead of ignoring them
@@ -269,7 +269,6 @@ with tab3:
     st.markdown("### Random Forest Feature Importance")
     st.markdown("The chart below illustrates which physical parameters the Machine Learning model relies on most heavily when calculating the maximum stable timestep.")
 
-    # ⚠️ REPLACE THESE VALUES WITH THE NUMBERS YOU GOT IN STEP 1
     # Ensure the order of these names matches the order of your PHYSICS_FEATURE_COLUMNS
     feature_names = [
         "Eccentricity", 
