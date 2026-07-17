@@ -217,7 +217,7 @@ st.sidebar.metric(label="Total Target Orbits", value=f"{orbit_count:.1f}")
 
 # Add clean footer links for portfolios
 st.sidebar.markdown("---")
-st.sidebar.markdown("🔗 **Links:** [GitHub Repo](https://github.com/) | [Documentation](https://github.com/)")
+st.sidebar.markdown("**Links:** [GitHub Repo](https://github.com/arnav2deopura-blip/physics-informed-integrator-selection)")
 
 
 # --- SETUP NAVIGATION TABS ---
@@ -417,7 +417,7 @@ with tab2:
         )
         
         st.download_button(
-            label="📥 Export Scientific Verification PDF",
+            label="Export Scientific Verification PDF",
             data=pdf_file,
             file_name="orbitml_verification_report.pdf",
             mime="application/pdf",
