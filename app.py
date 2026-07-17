@@ -175,16 +175,20 @@ st.caption("Bridging Machine Learning and Numerical Analysis for Orbital Dynamic
 # --- SIDEBAR CONTROL PANEL ---
 st.sidebar.header("Initial Orbital Conditions")
 
-init_x = 1.0
+# Match paper's radius sampling limits (0.5 to 2.0)
+init_x = st.sidebar.slider("Initial Position X (Radius)", min_value=0.5, max_value=2.0, value=1.0, step=0.1)
 init_y = 0.0
 
 st.sidebar.subheader("Initial Velocities")
-vx = st.sidebar.slider(r"Initial Velocity X ($v_x$)", min_value=-2.0, max_value=2.0, value=0.0, step=0.05)
-vy = st.sidebar.slider(r"Initial Velocity Y ($v_y$)", min_value=0.1, max_value=2.5, value=1.0, step=0.05)
+# Match paper's velocity sampling limits
+vx = st.sidebar.slider(r"Initial Velocity X ($v_x$)", min_value=-0.5, max_value=0.5, value=0.0, step=0.05)
+vy = st.sidebar.slider(r"Initial Velocity Y ($v_y$)", min_value=0.3, max_value=1.2, value=1.0, step=0.05)
 
 st.sidebar.subheader("Simulation Scope")
 sim_time = st.sidebar.slider("Total Simulation Time", min_value=1.0, max_value=100.0, value=20.0, step=1.0)
-perturb_eps = st.sidebar.slider(r"Gravitational Perturbation ($\epsilon$)", min_value=0.0, max_value=0.01, value=0.002, step=0.0005)
+
+# Enforce unperturbed pure two-body system physics as strictly defined in the methodology
+perturb_eps = 0.0
 
 # --- CALCULATE INTERMEDIATE PHYSICS FEATURES ---
 r_init = math.hypot(init_x, init_y)
@@ -225,7 +229,7 @@ tab1, tab2, tab3 = st.tabs(["Overview & Science", "Interactive Predictor", "Mode
 
 with tab1:
     st.subheader("Project Background & Objectives")
-    st.markdown("""
+    st.markdown(r"""
     ### The Core Challenge
     In astrodynamics, evaluating complex orbits over extended periods requires numerical integration engines. If an integration timestep ($\Delta t$) chosen is too large, the system accumulates artificial numerical energy, leading to orbits that mathematically explode or unphysically collapse. Conversely, picking a timestep that is needlessly small wastes critical processing power.
     
@@ -434,7 +438,7 @@ with tab3:
     Rather than treating the Random Forest Regressor as a complete black box, the model maps physical conservation constants to algorithmic constraints. 
     
     * **Eccentricity Correlation:** As eccentricity approaches e → 1, velocities at the periapsis (closest approach) spike drastically. The model actively scales down predicted stable timesteps dynamically to capture these high-acceleration phases.
-    * **Perturbation Sensitivity (ε):** Small gravitational variations ruin long-term structural predictability. The Random Forest weights these interactions heavily when managing maximum allowed values for non-symplectic integrators.
+    * **Orbit Count Correlation:** Accumulated numerical error grows with the number of cycles rather than raw elapsed time. The Random Forest heavily weights how many orbital periods the solver must survive.
     """)
     
     st.markdown("---")
@@ -449,7 +453,7 @@ with tab3:
         "Initial Velocity X", 
         "Simulation Time",
         "Radius", 
-        "Perturbation"
+        "Orbit Count"
     ]
     
     importance_values = [0.08357984, 0.05824969, 0.11379373, 0.01776321, 0.08107479, 0.18621281, 0.45932593]
