@@ -77,7 +77,7 @@ def generate_pdf_report(orbit_regime, eccentricity, e_dt, r_dt, l_dt, e_err, r_e
     pdf = OrbitReport()
     pdf.add_page()
     
-# Remove emojis so standard Helvetica can safely process the text
+    # Remove emojis so standard Helvetica can safely process the text
     clean_regime = orbit_regime
     for emoji in ["🟢", "🟡", "🟠", "🔴"]:
         clean_regime = clean_regime.replace(emoji, "").strip()
@@ -86,7 +86,7 @@ def generate_pdf_report(orbit_regime, eccentricity, e_dt, r_dt, l_dt, e_err, r_e
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 8, "1. Target Orbital Environment", ln=True)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, f"  - Classification Regime: {orbit_regime}", ln=True)
+    pdf.cell(0, 6, f"  - Classification Regime: {clean_regime}", ln=True)
     pdf.cell(0, 6, f"  - Computed System Eccentricity: {eccentricity:.4f}", ln=True)
     pdf.ln(5)
     
@@ -384,8 +384,6 @@ with tab2:
             template="plotly_dark",
             yaxis=dict(scaleanchor="x", scaleratio=1) 
         )
-        
-        st.plotly_chart(fig, use_container_width=True)
         
         st.plotly_chart(fig, use_container_width=True)
 
