@@ -11,7 +11,7 @@ import urllib.request
 import io
 from fpdf import FPDF
 
-# 1. Setup paths so we scan both the root and 'src' folders safely
+# setup paths to scan both the root and 'src' folders safely
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -20,11 +20,9 @@ SRC = ROOT / "src"
 if SRC.exists() and str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-# 2. Import using the full package name. 
 import orbit_ml.config as config
 import orbit_ml.physics as physics
 
-# Pull out the exact functions the dashboard code expects
 MODEL_NAME = config.MODEL_NAME
 PHYSICS_FEATURE_COLUMNS = config.PHYSICS_FEATURE_COLUMNS
 GM = config.GM
@@ -37,7 +35,7 @@ step_leapfrog = physics.step_leapfrog
 get_energy = physics.get_energy
 get_angular_momentum = physics.get_angular_momentum
 
-# Page Configurations (The Agency Visual Polish)
+# Page Configurations
 st.set_page_config(
     page_title="OrbitML: AI-Assisted Numerical Integrator Selection",
     layout="wide",
@@ -76,8 +74,7 @@ class OrbitReport(FPDF):
 def generate_pdf_report(orbit_regime, eccentricity, e_dt, r_dt, l_dt, e_err, r_err, l_err):
     pdf = OrbitReport()
     pdf.add_page()
-    
-    # Remove emojis so standard Helvetica can safely process the text
+
     clean_regime = orbit_regime
     for emoji in ["🟢", "🟡", "🟠", "🔴"]:
         clean_regime = clean_regime.replace(emoji, "").strip()
@@ -106,15 +103,13 @@ def generate_pdf_report(orbit_regime, eccentricity, e_dt, r_dt, l_dt, e_err, r_e
     pdf.cell(0, 6, f"  - Forward Euler Final Energy Accumulation Error: {e_err:.2e}", ln=True)
     pdf.cell(0, 6, f"  - Classical RK4 Final Cumulative Truncation Error: {r_err:.2e}", ln=True)
     pdf.cell(0, 6, f"  - Symplectic Leapfrog Preservation Energy Drift: {l_err:.2e}", ln=True)
-    
-    # Write to a pure virtual in-memory byte buffer
+
     pdf_buffer = io.BytesIO()
     pdf_string = pdf.output()
     pdf_buffer.write(pdf_string)
     pdf_buffer.seek(0)
     return pdf_buffer
 
-# --- DEFINE ST.FRAGMENT FOR THE MANUAL SLIDER (PREVENTS PAGE SCROLLING JUMPS) ---
 @st.fragment
 def render_manual_simulation_block(init_state, sim_time, perturb_eps, dt_rk4):
     st.markdown("---")
@@ -168,11 +163,11 @@ def render_manual_simulation_block(init_state, sim_time, perturb_eps, dt_rk4):
         st.plotly_chart(fig_err, use_container_width=True)
 
 
-# --- HEADER INTERFACE ---
+# header interface
 st.title("OrbitML: AI-Assisted Integrator Selection")
 st.caption("Bridging Machine Learning and Numerical Analysis for Orbital Dynamics Verification")
 
-# --- SIDEBAR CONTROL PANEL ---
+# sidebar control panel
 st.sidebar.header("Initial Orbital Conditions")
 
 # Match paper's radius sampling limits (0.5 to 2.0)
@@ -190,7 +185,7 @@ sim_time = st.sidebar.slider("Total Simulation Time", min_value=1.0, max_value=1
 # Enforce unperturbed pure two-body system physics as strictly defined in the methodology
 perturb_eps = 0.0
 
-# --- CALCULATE INTERMEDIATE PHYSICS FEATURES ---
+# calculate intermediate physics features
 r_init = math.hypot(init_x, init_y)
 temp_df = pd.DataFrame([{
     "vx": vx, "vy": vy, "r": r_init, "sim-time": sim_time, "perturb_eps": perturb_eps
@@ -201,7 +196,7 @@ eccentricity = temp_df.iloc[0]["ecc"]
 orbital_period = temp_df.iloc[0]["period"]
 orbit_count = temp_df.iloc[0]["orbit_count"]
 
-# --- NEW FEATURE: ORBIT REGIME CLASSIFICATION ---
+# orbit regime classification
 if eccentricity < 0.05:
     orbit_regime = "🟢 Nearly Circular"
 elif eccentricity < 0.90:
@@ -219,12 +214,11 @@ st.sidebar.metric(label="Calculated Eccentricity", value=f"{eccentricity:.3f}")
 st.sidebar.metric(label="Orbital Period ($T$)", value=f"{orbital_period:.2f} s")
 st.sidebar.metric(label="Total Target Orbits", value=f"{orbit_count:.1f}")
 
-# Add clean footer links for portfolios
 st.sidebar.markdown("---")
-st.sidebar.markdown("**Links:** [GitHub Repo](https://github.com/arnav2deopura-blip/physics-informed-integrator-selection)")
+st.sidebar.markdown("**Link(s):** [GitHub Repo](https://github.com/arnav2deopura-blip/physics-informed-integrator-selection)")
 
 
-# --- SETUP NAVIGATION TABS ---
+# navigation tabs
 tab1, tab2, tab3 = st.tabs(["Overview & Science", "Interactive Predictor", "Model Analytics"])
 
 with tab1:
@@ -262,14 +256,11 @@ with tab2:
         with col3:
             st.metric(label="Leapfrog Max Stable Δt", value=f"{dt_leapfrog:.5f}", delta="2nd Order (Symplectic)", delta_color="off")
 
-        # =========================================================================
-        # 🔥 NEW TIER 2 POWER MOVE: AI CONFIDENCE & RECOMMENDATION ENGINE
-        # =========================================================================
         st.markdown("---")
         rec_col1, rec_col2 = st.columns(2)
         
         with rec_col1:
-            # 1. Compute Uncertainty / Prediction Variance across individual trees
+            # Compute Uncertainty / Prediction Variance across individual trees
             try:
                 # Query every individual tree in the Random Forest to see its unique prediction
                 tree_predictions = np.array([tree.predict(features)[0] for tree in model.estimators_])
@@ -288,7 +279,7 @@ with tab2:
                     confidence_badge = "🔴 Low Confidence"
                     variance_text = "High (Model is outside nominal training boundaries)"
             except AttributeError:
-                # Fallback if the loaded model doesn't support estimators_
+                # Fallback if the loaded model doesn't support estimators
                 confidence_badge = "⚪ Not Available"
                 variance_text = "Unknown"
 
@@ -298,7 +289,7 @@ with tab2:
             st.markdown(f"**Prediction Variance:** `{variance_text}`")
 
         with rec_col2:
-            # 2. Determine the most computationally efficient choice programmatically
+            # Determine the most computationally efficient choice programmatically
             max_dt = max(dt_euler, dt_rk4, dt_leapfrog)
             
             if max_dt == dt_rk4:
@@ -311,10 +302,9 @@ with tab2:
                 recommended_integrator = "Forward Euler"
                 reasoning = "It yields the largest predicted math step size, though caution is advised due to its first-order nature."
 
-            # Render the plain-english scientific recommendation callout
-            st.info(f"💡 **Recommended Integrator:** **{recommended_integrator}** because it offers the **largest predicted stable timestep** ({max_dt:.4f}), providing optimal throughput for ~{orbit_count:.1f} orbital periods.")
+            st.info(f"**Recommended Integrator:** **{recommended_integrator}** because it offers the **largest predicted stable timestep** ({max_dt:.4f}), providing optimal throughput for ~{orbit_count:.1f} orbital periods.")
 
-        # 3. Physics Constraint Alert: Triggered dynamically by high eccentricity
+        # Physics Constraint Alert: Triggered dynamically by high eccentricity
         if eccentricity > 0.50:
             st.warning(
                 f"⚠️ **Physics Constraint Alert:** Your current orbit has a high eccentricity (`e = {eccentricity:.2f}`). "
@@ -329,7 +319,7 @@ with tab2:
     if model is not None:
         init_state = [init_x, init_y, vx, vy]
         
-        # 1. Capture the energy lists (the 3rd output) instead of ignoring them
+        # Capture the energy lists
         ex, ey, e_energy, _, _, _ = physics_run_sim(step_euler, init_state, dt_euler, sim_time, perturb_eps)
         rkx, rky, rk_energy, _, _, _ = physics_run_sim(step_rk4, init_state, dt_rk4, sim_time, perturb_eps)
         lx, ly, l_energy, _, _, _ = physics_run_sim(step_leapfrog, init_state, dt_leapfrog, sim_time, perturb_eps)
@@ -347,7 +337,7 @@ with tab2:
         # Central Gravity Source
         fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(size=15, color='gold'), name='Central Mass'))
         
-        # Forward Euler (Color mapped by local error)
+        # Forward Euler
         fig.add_trace(go.Scatter(
             x=ex, y=ey, mode='markers+lines',
             name='Forward Euler',
@@ -358,7 +348,7 @@ with tab2:
             )
         ))
         
-        # RK4 (Color mapped by local error)
+        # RK4
         fig.add_trace(go.Scatter(
             x=rkx, y=rky, mode='markers+lines',
             name='Classical RK4',
@@ -369,7 +359,7 @@ with tab2:
             )
         ))
         
-        # Leapfrog (Color mapped by local error)
+        # Leapfrog
         fig.add_trace(go.Scatter(
             x=lx, y=ly, mode='markers+lines',
             name='Leapfrog (Symplectic)',
@@ -391,26 +381,26 @@ with tab2:
         
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- BENCHMARK COMPARISON TABLE ---
+        # benchmark comparison table
         st.markdown("### Algorithmic Performance Benchmark")
         
-        # 2. Get the exact starting energy of the system
+        # Get the exact starting energy of the system
         e0 = get_energy(init_state, perturb_eps)
         safe_e0 = e0 if e0 != 0 else 1e-12
         
-        # 3. Calculate relative error using the very last item [-1] in the energy arrays
+        # Calculate relative error using the very last item [-1] in the energy arrays
         euler_err = abs((e_energy[-1] - e0) / safe_e0)
         rk4_err = abs((rk_energy[-1] - e0) / safe_e0)
         leapfrog_err = abs((l_energy[-1] - e0) / safe_e0)
         
-        # 4. Create the Pandas DataFrame
+        # Create the Pandas DataFrame
         benchmark_data = pd.DataFrame({
             "Integrator Method": ["Forward Euler (1st Order)", "Classical RK4 (4th Order)", "Leapfrog (Symplectic)"],
             "Predicted Stable Δt": [f"{dt_euler:.5f}", f"{dt_rk4:.5f}", f"{dt_leapfrog:.5f}"],
             "Final Energy Drift Error": [f"{euler_err:.2e}", f"{rk4_err:.2e}", f"{leapfrog_err:.2e}"]
         })
         
-        # 5. Render the table in Streamlit without the ugly index column
+        # Render the table in Streamlit without the ugly index column
         st.dataframe(benchmark_data, use_container_width=True, hide_index=True)
 
         pdf_file = generate_pdf_report(
@@ -445,7 +435,6 @@ with tab3:
     st.markdown("### Random Forest Feature Importance")
     st.markdown("The chart below illustrates which physical parameters the Machine Learning model relies on most heavily when calculating the maximum stable timestep.")
 
-    # Ensure the order of these names matches the order of your PHYSICS_FEATURE_COLUMNS
     feature_names = [
         "Eccentricity", 
         "Orbital Period", 
@@ -470,7 +459,6 @@ with tab3:
         )
     ))
 
-    # Format the layout to match your existing app theme
     fig_importance.update_layout(
         title="Relative Importance of Orbital Features",
         xaxis_title="Importance Weight",
