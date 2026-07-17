@@ -202,6 +202,68 @@ with tab2:
         with col3:
             st.metric(label="Leapfrog Max Stable Δt", value=f"{dt_leapfrog:.5f}", delta="2nd Order (Symplectic)", delta_color="off")
 
+        # =========================================================================
+        # 🔥 NEW TIER 2 POWER MOVE: AI CONFIDENCE & RECOMMENDATION ENGINE
+        # =========================================================================
+        st.markdown("---")
+        rec_col1, rec_col2 = st.columns(2)
+        
+        with rec_col1:
+            # 1. Compute Uncertainty / Prediction Variance across individual trees
+            try:
+                # Query every individual tree in the Random Forest to see its unique prediction
+                tree_predictions = np.array([tree.predict(features)[0] for tree in model.estimators_])
+                # Calculate the standard deviation (spread) of the trees' choices
+                prediction_variance = np.var(tree_predictions, axis=0)
+                avg_variance = np.mean(prediction_variance)
+                
+                # Turn the variance number into an interpretable category
+                if avg_variance < 0.001:
+                    confidence_badge = "🟢 High Confidence"
+                    variance_text = "Low (Trees are in high agreement)"
+                elif avg_variance < 0.01:
+                    confidence_badge = "🟡 Moderate Confidence"
+                    variance_text = "Medium (Acceptable tree divergence)"
+                else:
+                    confidence_badge = "🔴 Low Confidence"
+                    variance_text = "High (Model is outside nominal training boundaries)"
+            except AttributeError:
+                # Fallback if the loaded model doesn't support estimators_
+                confidence_badge = "⚪ Not Available"
+                variance_text = "Unknown"
+
+            # Display the Model Uncertainty Analytics
+            st.markdown(f"#### AI Prediction Insight")
+            st.markdown(f"**Model Status:** {confidence_badge}")
+            st.markdown(f"**Prediction Variance:** `{variance_text}`")
+
+        with rec_col2:
+            # 2. Determine the most computationally efficient choice programmatically
+            max_dt = max(dt_euler, dt_rk4, dt_leapfrog)
+            
+            if max_dt == dt_rk4:
+                recommended_integrator = "Classical RK4"
+                reasoning = "It yields the largest predicted stable timestep window, minimizing total iterative loops required for accurate results."
+            elif max_dt == dt_leapfrog:
+                recommended_integrator = "Leapfrog (Symplectic)"
+                reasoning = "It yields the largest predicted stable timestep window while maintaining geometric structural phase space conservation."
+            else:
+                recommended_integrator = "Forward Euler"
+                reasoning = "It yields the largest predicted math step size, though caution is advised due to its first-order nature."
+
+            # Render the plain-english scientific recommendation callout
+            st.info(f"💡 **Recommended Integrator:** **{recommended_integrator}** because it offers the **largest predicted stable timestep** ({max_dt:.4f}), providing optimal throughput for ~{orbit_count:.1f} orbital periods.")
+
+        # 3. Physics Constraint Alert: Triggered dynamically by high eccentricity
+        if eccentricity > 0.50:
+            st.warning(
+                f"⚠️ **Physics Constraint Alert:** Your current orbit has a high eccentricity (`e = {eccentricity:.2f}`). "
+                "Forward Euler is mathematically guaranteed to fail (diverge) here because explicit first-order methods cannot "
+                "conserve energy during high-acceleration closest approaches (the periapsis). The **Leapfrog** or **RK4** trajectories below should be more accurate."
+            )
+        st.markdown("---")
+        # =========================================================================
+
     st.subheader("Live Simulation Verification")
 
     if model is not None:
@@ -229,7 +291,7 @@ with tab2:
         
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- NEW CODE: BENCHMARK COMPARISON TABLE ---
+        # --- BENCHMARK COMPARISON TABLE ---
         st.markdown("### Algorithmic Performance Benchmark")
         
         # 2. Get the exact starting energy of the system
@@ -250,7 +312,6 @@ with tab2:
         
         # 5. Render the table in Streamlit without the ugly index column
         st.dataframe(benchmark_data, use_container_width=True, hide_index=True)
-        # --------------------------------------------
 
         # Call the standalone fragment manual section
         render_manual_simulation_block(init_state, sim_time, perturb_eps, dt_rk4)
