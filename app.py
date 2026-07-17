@@ -8,6 +8,8 @@ import pandas as pd
 import joblib
 import plotly.graph_objects as go
 import urllib.request
+import io
+from fpdf import FPDF
 
 # 1. Setup paths so we scan both the root and 'src' folders safely
 ROOT = Path(__file__).resolve().parent
@@ -57,6 +59,55 @@ def load_ml_model():
 
 model = load_ml_model()
 
+class OrbitReport(FPDF):
+    def header(self):
+        self.set_font("Helvetica", "B", 16)
+        self.set_text_color(31, 41, 55)
+        self.cell(0, 10, "OrbitML Verification Report", ln=True, align="C")
+        self.set_font("Helvetica", "I", 10)
+        self.cell(0, 5, "Automated Math Integrity & Machine Learning Evaluation", ln=True, align="C")
+        self.ln(10)
+        
+    def footer(self):
+        self.set_y(-15)
+        self.set_font("Helvetica", "I", 8)
+        self.cell(0, 10, f"Page {self.page_no()}", align="C")
+
+def generate_pdf_report(orbit_regime, eccentricity, e_dt, r_dt, l_dt, e_err, r_err, l_err):
+    pdf = OrbitReport()
+    pdf.add_page()
+    
+    # Section 1: Physical Parameters
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "1. Target Orbital Environment", ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, f"  - Classification Regime: {orbit_regime}", ln=True)
+    pdf.cell(0, 6, f"  - Computed System Eccentricity: {eccentricity:.4f}", ln=True)
+    pdf.ln(5)
+    
+    # Section 2: ML Decisions
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "2. AI Optimization Thresholds", ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, f"  - Forward Euler Predicted Safe Step (dt): {e_dt:.5f}", ln=True)
+    pdf.cell(0, 6, f"  - Classical RK4 Predicted Safe Step (dt): {r_dt:.5f}", ln=True)
+    pdf.cell(0, 6, f"  - Symplectic Leapfrog Predicted Safe Step (dt): {l_dt:.5f}", ln=True)
+    pdf.ln(5)
+    
+    # Section 3: Diagnostic Results
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "3. Numerical Stability Matrix", ln=True)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, f"  - Forward Euler Final Energy Accumulation Error: {e_err:.2e}", ln=True)
+    pdf.cell(0, 6, f"  - Classical RK4 Final Cumulative Truncation Error: {r_err:.2e}", ln=True)
+    pdf.cell(0, 6, f"  - Symplectic Leapfrog Preservation Energy Drift: {l_err:.2e}", ln=True)
+    
+    # Write to a pure virtual in-memory byte buffer
+    pdf_buffer = io.BytesIO()
+    pdf_string = pdf.output()
+    pdf_buffer.write(pdf_string)
+    pdf_buffer.seek(0)
+    return pdf_buffer
 
 # --- DEFINE ST.FRAGMENT FOR THE MANUAL SLIDER (PREVENTS PAGE SCROLLING JUMPS) ---
 @st.fragment
@@ -274,20 +325,62 @@ with tab2:
         rkx, rky, rk_energy, _, _, _ = physics_run_sim(step_rk4, init_state, dt_rk4, sim_time, perturb_eps)
         lx, ly, l_energy, _, _, _ = physics_run_sim(step_leapfrog, init_state, dt_leapfrog, sim_time, perturb_eps)
 
+        # Calculate local relative energy arrays for color mapping
+        e0 = get_energy(init_state, perturb_eps)
+        safe_e0 = e0 if e0 != 0 else 1e-12
+        
+        euler_local_err = [abs((e - e0) / safe_e0) for e in e_energy]
+        rk4_local_err = [abs((e - e0) / safe_e0) for e in rk_energy]
+        leapfrog_local_err = [abs((e - e0) / safe_e0) for e in l_energy]
+
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(size=15, color='gold'), name='Central Mass (GM=1)'))
-        fig.add_trace(go.Scatter(x=ex, y=ey, mode='lines', name=f'Forward Euler (Δt={dt_euler:.4f})', line=dict(dash='dot', color='red')))
-        fig.add_trace(go.Scatter(x=rkx, y=rky, mode='lines', name=f'RK4 (Δt={dt_rk4:.4f})', line=dict(color='deepskyblue', width=2.5)))
-        fig.add_trace(go.Scatter(x=lx, y=ly, mode='lines', name=f'Leapfrog (Δt={dt_leapfrog:.4f})', line=dict(color='limegreen', width=2)))
+        
+        # Central Gravity Source
+        fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(size=15, color='gold'), name='Central Mass'))
+        
+        # Forward Euler (Color mapped by local error)
+        fig.add_trace(go.Scatter(
+            x=ex, y=ey, mode='markers+lines',
+            name='Forward Euler',
+            line=dict(width=1, color='rgba(200,50,50,0.3)'),
+            marker=dict(
+                size=4, color=euler_local_err, colorscale='Reds', 
+                showscale=False, cmin=0, cmax=1e-1
+            )
+        ))
+        
+        # RK4 (Color mapped by local error)
+        fig.add_trace(go.Scatter(
+            x=rkx, y=rky, mode='markers+lines',
+            name='Classical RK4',
+            line=dict(width=1.5, color='rgba(50,180,240,0.3)'),
+            marker=dict(
+                size=4, color=rk4_local_err, colorscale='Blues', 
+                showscale=False, cmin=0, cmax=1e-5
+            )
+        ))
+        
+        # Leapfrog (Color mapped by local error)
+        fig.add_trace(go.Scatter(
+            x=lx, y=ly, mode='markers+lines',
+            name='Leapfrog (Symplectic)',
+            line=dict(width=1.5, color='rgba(50,220,100,0.3)'),
+            marker=dict(
+                size=4, color=leapfrog_local_err, colorscale='Greens', 
+                showscale=False, cmin=0, cmax=1e-5
+            )
+        ))
 
         fig.update_layout(
-            title="Orbital Trajectories Comparison",
+            title="Orbital Trajectories (Color intensity indicates local energy drift)",
             xaxis_title="Position X",
             yaxis_title="Position Y",
-            height=600,
+            height=620,
             template="plotly_dark",
             yaxis=dict(scaleanchor="x", scaleratio=1) 
         )
+        
+        st.plotly_chart(fig, use_container_width=True)
         
         st.plotly_chart(fig, use_container_width=True)
 
@@ -312,6 +405,21 @@ with tab2:
         
         # 5. Render the table in Streamlit without the ugly index column
         st.dataframe(benchmark_data, use_container_width=True, hide_index=True)
+
+        pdf_file = generate_pdf_report(
+            orbit_regime=orbit_regime,
+            eccentricity=eccentricity,
+            e_dt=dt_euler, r_dt=dt_rk4, l_dt=dt_leapfrog,
+            e_err=euler_err, r_err=rk4_err, l_err=leapfrog_err
+        )
+        
+        st.download_button(
+            label="📥 Export Scientific Verification PDF",
+            data=pdf_file,
+            file_name="orbitml_verification_report.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
 
         # Call the standalone fragment manual section
         render_manual_simulation_block(init_state, sim_time, perturb_eps, dt_rk4)
