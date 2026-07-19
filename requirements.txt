@@ -19,3 +19,4 @@ tzdata==2026.2
 streamlit
 plotly
 fpdf2
+gdown==5.2.0
