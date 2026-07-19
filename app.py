@@ -42,14 +42,16 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Cache the ML Model so it doesn't reload on every slider move
 @st.cache_resource
 def load_ml_model():
     model_path = ROOT / MODEL_NAME
     if not model_path.exists():
-        url = "https://drive.google.com/uc?export=download&id=1x3VQUxWwIEWFekePihidyMiJjMM-9iBS"
+        file_id = "1x3VQUxWwIEWFekePihidyMiJjMM-9iBS"
+        url = f"https://drive.google.com/uc?id={file_id}"
+        
         with st.spinner("Downloading ML model files from cloud storage..."):
-            urllib.request.urlretrieve(url, model_path)
+            import gdown
+            gdown.download(url, str(model_path), quiet=False)
     
     if os.path.exists(model_path):
         return joblib.load(model_path)
