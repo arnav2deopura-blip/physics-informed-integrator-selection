@@ -45,15 +45,21 @@ st.set_page_config(
 @st.cache_resource
 def load_ml_model():
     model_path = ROOT / MODEL_NAME
-    if not model_path.exists():
-        file_id = "1x3VQUxWwIEWFekePihidyMiJjMM-9iBS"
-        url = f"https://drive.google.com/uc?id={file_id}"
-        
-        with st.spinner("Downloading ML model files from cloud storage..."):
-            import gdown
-            gdown.download(url, str(model_path), quiet=False)
+
+    if model_path.exists():
+        try:
+            return joblib.load(model_path)
+        except Exception as e:
+            model_path.unlink() 
+
+    file_id = "1x3VQUxWwIEWFekePihidyMiJjMM-9iBS"
+    url = f"https://drive.google.com/uc?id={file_id}"
     
-    if os.path.exists(model_path):
+    with st.spinner("Downloading ML model files from cloud storage..."):
+        import gdown
+        gdown.download(url, str(model_path), quiet=False)
+        
+    if model_path.exists():
         return joblib.load(model_path)
     return None
 
